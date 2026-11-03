@@ -1,0 +1,20 @@
+cat << 'EOF' > .gitignore
+# Environnement virtuel Python
+venv/
+.venv/
+env/
+
+# Fichiers compilés / caches
+__pycache__/
+*.py[cod]
+
+# Modèles PaddleOCR
+.paddleocr/
+
+# Fichiers de données et exports
+storage/*.db
+storage/*.sqlite
+*.xlsx
+input_photos/*
+!input_photos/.gitkeep
+EOF

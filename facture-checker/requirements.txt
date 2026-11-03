@@ -1,0 +1,26 @@
+# Requirements pour Facture-Checker
+# Vision et pré-traitement d'images
+opencv-python-headless>=4.8.0
+numpy>=1.24.0,<2.4.0
+
+# OCR avec bounding boxes spatiales
+paddleocr>=3.0.0
+paddlepaddle>=3.2.0,<=3.2.2
+
+# Extraction textuelle et recherche floue
+thefuzz>=0.20.0
+python-Levenshtein>=0.23.0
+
+# Stockage et export dynamique
+openpyxl>=3.1.0
+pandas>=2.0.0
+
+# Dépendances auxiliaires
+Pillow>=10.0.0
+setuptools>=68.0.0
+
+# Interface Web Mobile (PWA / Scanner smartphone)
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.6
+qrcode>=7.0.0

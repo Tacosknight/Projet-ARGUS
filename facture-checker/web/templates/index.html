@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Facture-Checker • Audioprothèse & Rapprochement 🦻</title>
+    <style>
+        :root {
+            --primary: #1e3a8a;
+            --primary-light: #3b82f6;
+            --success-bg: #dcfce7;
+            --success-text: #15803d;
+            --success-border: #86efac;
+            --error-bg: #fee2e2;
+            --error-text: #b91c1c;
+            --error-border: #fca5a5;
+            --warn-bg: #fef3c7;
+            --warn-text: #b45309;
+            --warn-border: #fcd34d;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 14px;
+            max-width: 540px;
+            margin: 0 auto;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            text-align: center;
+            padding: 10px 0 14px 0;
+        }
+
+        .app-title {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .app-subtitle {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        /* Onglets de navigation mobile */
+        .tab-bar {
+            display: flex;
+            background: #e2e8f0;
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 14px;
+            gap: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 10px 6px;
+            font-size: 0.88rem;
+            font-weight: 700;
+            border: none;
+            border-radius: 9px;
+            background: transparent;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .tab-btn.active {
+            background: #ffffff;
+            color: var(--primary);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border: 1px solid #e2e8f0;
+            margin-bottom: 14px;
+        }
+
+        /* Type selector */
+        .type-selector {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .type-opt {
+            flex: 1;
+            padding: 8px 4px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            border: 1.5px solid #cbd5e1;
+            border-radius: 10px;
+            background: #f8fafc;
+            color: #475569;
+            cursor: pointer;
+            text-align: center;
+        }
+
+        .type-opt.selected {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            color: #1d4ed8;
+        }
+
+        .upload-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-capture {
+            background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 14px;
+            font-size: 1.02rem;
+            font-weight: 700;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(30, 64, 175, 0.25);
+        }
+
+        .btn-secondary {
+            background: #f1f5f9;
+            color: #334155;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border: 1px solid #cbd5e1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .hidden-input { display: none; }
+
+        .preview-container {
+            display: none;
+            margin-top: 14px;
+        }
+
+        .preview-grid {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 4px 2px;
+            margin-bottom: 12px;
+            scroll-snap-type: x mandatory;
+        }
+
+        .preview-card {
+            position: relative;
+            flex: 0 0 120px;
+            background: #f1f5f9;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #cbd5e1;
+            scroll-snap-align: start;
+        }
+
+        .preview-card img {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .preview-card .page-badge {
+            background: rgba(15, 23, 42, 0.8);
+            color: white;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 6px;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+        }
+
+        .preview-card .btn-remove-page {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+        }
+
+        .btn-add-page {
+            background: #eef2ff;
+            color: #4338ca;
+            border: 1.5px dashed #818cf8;
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            width: 100%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 10px;
+            transition: background 0.15s ease;
+        }
+        .btn-add-page:hover {
+            background: #e0e7ff;
+        }
+
+        .multipage-banner {
+            background: #ecfdf5;
+            border: 1px solid #6ee7b7;
+            color: #065f46;
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+
+        .btn-analyze {
+            width: 100%;
+            margin-top: 12px;
+            background: #059669;
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .loading-box {
+            display: none;
+            text-align: center;
+            padding: 24px 10px;
+        }
+
+        .spinner {
+            width: 42px;
+            height: 42px;
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin: 0 auto 12px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .step-label {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        /* Résultat d'analyse */
+        .result-box { display: none; animation: fadeIn 0.3s ease; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .badge-status {
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-weight: 800;
+            font-size: 1rem;
+            text-align: center;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .badge-valide { background: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-border); }
+        .badge-erreur { background: var(--error-bg); color: var(--error-text); border: 1px solid var(--error-border); }
+        .badge-warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+
+        /* Box Numéros de série */
+        .sn-box {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .sn-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #1d4ed8;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sn-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .sn-tag {
+            background: #1e40af;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-weight: 800;
+            font-size: 0.88rem;
+            letter-spacing: 0.5px;
+        }
+
+        .reconcil-banner {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .reconcil-ok { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .reconcil-missing { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+
+        .ttc-highlight {
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+
+        .ttc-amount {
+            font-size: 1.7rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .meta-item {
+            background: #f8fafc;
+            padding: 9px;
+            border-radius: 10px;
+            border: 1px solid #f1f5f9;
+        }
+
+        .meta-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+        }
+
+        .meta-val {
+            font-size: 0.88rem;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .error-alert {
+            background: #fff1f2;
+            border: 1px solid #fecdd3;
+            border-radius: 10px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .error-title { color: #be123c; font-size: 0.8rem; font-weight: 700; margin-bottom: 4px; }
+        .error-list { padding-left: 16px; font-size: 0.78rem; color: #881337; }
+
+        .btn-excel {
+            background: #047857;
+            color: white;
+            text-decoration: none;
+            padding: 13px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 0.92rem;
+            margin-top: 12px;
+        }
+
+        /* Onglet Réconciliation */
+        .rec-item {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: white;
+        }
+
+        .rec-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .rec-sn {
+            font-weight: 800;
+            font-size: 0.95rem;
+            color: var(--primary);
+        }
+
+        .rec-pill {
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
+        .pill-rapproche { background: var(--success-bg); color: var(--success-text); }
+        .pill-non-refacture { background: var(--error-bg); color: var(--error-text); }
+        .pill-achat-manquant { background: var(--warn-bg); color: var(--warn-text); }
+
+        .rec-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.82rem;
+            margin-top: 4px;
+            color: #334155;
+        }
+
+        .rec-label { color: var(--text-muted); font-size: 0.75rem; }
+
+        .footer {
+            margin-top: auto;
+            text-align: center;
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            padding: 14px 0 6px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="app-title">
+            <span>🦻</span> Facture-Checker
+        </div>
+        <div class="app-subtitle">Rapprochement des prothèses auditives (S/N)</div>
+    </header>
+
+    <!-- Navigation onglets -->
+    <div class="tab-bar">
+        <button id="tabScanner" class="tab-btn active" onclick="switchTab('scanner')">
+            <span>📸</span> Scanner Facture
+        </button>
+        <button id="tabReconcil" class="tab-btn" onclick="switchTab('reconcil')">
+            <span>🔗</span> Prothèses (S/N)
+        </button>
+    </div>
+
+    <!-- VUE 1 : SCANNER -->
+    <div id="viewScanner">
+        <div class="card">
+            <!-- Sélecteur de type -->
+            <div class="type-selector">
+                <div id="typeAuto" class="type-opt selected" onclick="selectType(null, this)">✨ Détection Auto</div>
+                <div id="typeFournisseur" class="type-opt" onclick="selectType('FOURNISSEUR', this)">🏷️ Achat Fabricant</div>
+                <div id="typeClient" class="type-opt" onclick="selectType('CLIENT', this)">👤 Vente Patient</div>
+            </div>
+
+            <div class="upload-actions">
+                <button class="btn-capture" onclick="document.getElementById('cameraInput').click()">
+                    <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                        <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                    Prendre la facture en photo
+                </button>
+                <input type="file" id="cameraInput" class="hidden-input" accept="image/*" capture="environment" onchange="handleFileSelect(this)">
+
+                <button class="btn-secondary" onclick="document.getElementById('fileInput').click()">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    Importer (mono ou multi-pages)
+                </button>
+                <input type="file" id="fileInput" class="hidden-input" accept="image/*" multiple onchange="handleFileSelect(this)">
+            </div>
+
+            <div id="previewContainer" class="preview-container">
+                <div style="font-size:0.82rem; font-weight:700; color:var(--text-muted); margin-bottom:6px;">
+                    Pages sélectionnées pour cette facture :
+                </div>
+                <div id="previewGrid" class="preview-grid"></div>
+
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button class="btn-add-page" type="button" onclick="document.getElementById('addPageCameraInput').click()">
+                        <span>📸</span> Prendre la Page suivante (P2...)
+                    </button>
+                    <button class="btn-add-page" type="button" style="flex: 0 0 50px;" title="Ajouter depuis galerie" onclick="document.getElementById('addPageFileInput').click()">
+                        <span>📁</span>
+                    </button>
+                </div>
+                <input type="file" id="addPageCameraInput" class="hidden-input" accept="image/*" capture="environment" onchange="handleAddPage(this)">
+                <input type="file" id="addPageFileInput" class="hidden-input" accept="image/*" multiple onchange="handleAddPage(this)">
+
+                <button id="btnAnalyze" class="btn-analyze" onclick="uploadAndAnalyze()">
+                    <span>⚡</span> Vérifier & Rapprocher (<span id="pageCountLabel">1 page</span>)
+                </button>
+            </div>
+
+            <div id="loadingBox" class="loading-box">
+                <div class="spinner"></div>
+                <div id="loadingStep" class="step-label">Redressement 4 points & seuillage...</div>
+            </div>
+        </div>
+
+        <!-- Résultat scan -->
+        <div id="resultBox" class="card result-box">
+            <div id="multipageBanner" class="multipage-banner" style="display: none;">
+                <span style="font-size: 1.25rem;">🔗</span>
+                <span id="multipageText">Facture multi-pages assemblée avec succès</span>
+            </div>
+
+            <div id="badgeStatus" class="badge-status">
+                <span id="statusIcon">✔</span>
+                <span id="statusText">FACTURE CONFORME</span>
+            </div>
+
+            <!-- Box Numéros de série S/N -->
+            <div id="snBox" class="sn-box" style="display: none;">
+                <div class="sn-title">
+                    <span>🦻</span> Numéro(s) de Série Détecté(s) (S/N) :
+                </div>
+                <div id="snTags" class="sn-tags"></div>
+                <div id="snReconcilBanner" class="reconcil-banner"></div>
+            </div>
+
+            <div class="ttc-highlight">
+                <div class="meta-label">Montant Total TTC</div>
+                <div id="valTtc" class="ttc-amount">-- €</div>
+            </div>
+
+            <div class="meta-grid">
+                <div class="meta-item">
+                    <div class="meta-label">Type Facture</div>
+                    <div id="valType" class="meta-val">--</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">N° Facture</div>
+                    <div id="valNum" class="meta-val">--</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Date Émission</div>
+                    <div id="valDate" class="meta-val">--</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Total HT</div>
+                    <div id="valHt" class="meta-val">-- €</div>
+                </div>
+                <div class="meta-item" style="grid-column: span 2;">
+                    <div class="meta-label">Fournisseur / Patient</div>
+                    <div id="valTiers" class="meta-val">--</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">SIRET</div>
+                    <div id="valSiret" class="meta-val">--</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Montant TVA</div>
+                    <div id="valTva" class="meta-val">-- €</div>
+                </div>
+            </div>
+
+            <div id="errorAlert" class="error-alert" style="display: none;">
+                <div class="error-title">⚠ Anomalies Détectées :</div>
+                <ul id="errorList" class="error-list"></ul>
+            </div>
+
+            <a id="btnDownloadExcel" href="/api/export" class="btn-excel">
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Télécharger le classeur Excel (.xlsx)
+            </a>
+        </div>
+    </div>
+
+    <!-- VUE 2 : RAPPROCHEMENT PAR S/N -->
+    <div id="viewReconcil" style="display: none;">
+        <div class="card">
+            <h3 style="font-size: 1.05rem; margin-bottom: 8px; color: var(--primary);">
+                📊 État des Appareils & Dépenses
+            </h3>
+            <div id="recSummary" style="font-size: 0.85rem; color: #475569; margin-bottom: 12px;">
+                Chargement des données...
+            </div>
+            <div id="recList"></div>
+            <a href="/api/export" class="btn-excel" style="margin-top: 10px;">
+                Télécharger l'Audit Complet Excel
+            </a>
+        </div>
+    </div>
+
+    <div class="footer">
+        Facture-Checker • Traitement déterministe local sans LLM
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        let selectedInvoiceType = null;
+
+        function selectType(type, el) {
+            selectedInvoiceType = type;
+            document.querySelectorAll('.type-opt').forEach(opt => opt.classList.remove('selected'));
+            el.classList.add('selected');
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tabScanner').classList.toggle('active', tab === 'scanner');
+            document.getElementById('tabReconcil').classList.toggle('active', tab === 'reconcil');
+            document.getElementById('viewScanner').style.display = tab === 'scanner' ? 'block' : 'none';
+            document.getElementById('viewReconcil').style.display = tab === 'reconcil' ? 'block' : 'none';
+
+            if (tab === 'reconcil') {
+                loadReconciliationData();
+            }
+        }
+
+        function handleFileSelect(input) {
+            if (input.files && input.files.length > 0) {
+                selectedFiles = Array.from(input.files);
+                renderPreviews();
+                input.value = "";
+            }
+        }
+
+        function handleAddPage(input) {
+            if (input.files && input.files.length > 0) {
+                for (let i = 0; i < input.files.length; i++) {
+                    selectedFiles.push(input.files[i]);
+                }
+                renderPreviews();
+                input.value = "";
+            }
+        }
+
+        function removePage(index) {
+            selectedFiles.splice(index, 1);
+            if (selectedFiles.length === 0) {
+                document.getElementById('previewContainer').style.display = 'none';
+            } else {
+                renderPreviews();
+            }
+        }
+
+        function renderPreviews() {
+            const container = document.getElementById('previewContainer');
+            const grid = document.getElementById('previewGrid');
+            const pageCountLabel = document.getElementById('pageCountLabel');
+            const resultBox = document.getElementById('resultBox');
+
+            if (selectedFiles.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            resultBox.style.display = 'none';
+            grid.innerHTML = "";
+            pageCountLabel.innerText = selectedFiles.length + (selectedFiles.length > 1 ? " pages" : " page");
+
+            selectedFiles.forEach((file, idx) => {
+                const card = document.createElement('div');
+                card.className = 'preview-card';
+
+                const img = document.createElement('img');
+                const reader = new FileReader();
+                reader.onload = e => { img.src = e.target.result; };
+                reader.readAsDataURL(file);
+                card.appendChild(img);
+
+                const badge = document.createElement('div');
+                badge.className = 'page-badge';
+                badge.innerText = `Page ${idx + 1}`;
+                card.appendChild(badge);
+
+                const btnDel = document.createElement('button');
+                btnDel.className = 'btn-remove-page';
+                btnDel.type = 'button';
+                btnDel.innerText = '✕';
+                btnDel.title = 'Supprimer cette page';
+                btnDel.onclick = (e) => {
+                    e.stopPropagation();
+                    removePage(idx);
+                };
+                card.appendChild(btnDel);
+
+                grid.appendChild(card);
+            });
+
+            container.style.display = 'block';
+        }
+
+        async function uploadAndAnalyze() {
+            if (selectedFiles.length === 0) return;
+
+            const previewContainer = document.getElementById('previewContainer');
+            const loadingBox = document.getElementById('loadingBox');
+            const loadingStep = document.getElementById('loadingStep');
+            const resultBox = document.getElementById('resultBox');
+
+            previewContainer.style.display = 'none';
+            loadingBox.style.display = 'block';
+            resultBox.style.display = 'none';
+
+            const steps = [
+                "Redressement 4 points & homographie...",
+                "Extraction OCR PaddleOCR...",
+                selectedFiles.length > 1 ? "Assemblage automatique des pages..." : "Analyse de la pagination...",
+                "Détection des Numéros de Série (S/N)...",
+                "Contrôles fiscaux & Rapprochement..."
+            ];
+            let stepIdx = 0;
+            const interval = setInterval(() => {
+                stepIdx = (stepIdx + 1) % steps.length;
+                loadingStep.innerText = steps[stepIdx];
+            }, 1200);
+
+            const formData = new FormData();
+            selectedFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            if (selectedInvoiceType) {
+                formData.append('invoice_type', selectedInvoiceType);
+            }
+
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                clearInterval(interval);
+                loadingBox.style.display = 'none';
+
+                if (!response.ok) throw new Error("Échec de l'analyse serveur.");
+                const data = await response.json();
+                renderResult(data);
+
+            } catch (err) {
+                clearInterval(interval);
+                loadingBox.style.display = 'none';
+                alert("Erreur : " + err.message);
+                previewContainer.style.display = 'block';
+            }
+        }
+
+        function renderResult(data) {
+            const resultBox = document.getElementById('resultBox');
+            const badge = document.getElementById('badgeStatus');
+            const icon = document.getElementById('statusIcon');
+            const text = document.getElementById('statusText');
+
+            const status = (data.status || "A_VERIFIER").toUpperCase();
+            badge.className = "badge-status";
+
+            if (status === "VALIDE") {
+                badge.classList.add("badge-valide");
+                icon.innerText = "✔";
+                text.innerText = "FACTURE CONFORME (VALIDE)";
+            } else if (status === "ERREUR_CALCUL") {
+                badge.classList.add("badge-erreur");
+                icon.innerText = "✘";
+                text.innerText = "ERREUR ARITHMÉTIQUE";
+            } else if (status === "SIRET_INVALIDE") {
+                badge.classList.add("badge-erreur");
+                icon.innerText = "✘";
+                text.innerText = "SIRET / LUHN INVALIDE";
+            } else if (status === "DOUBLON") {
+                badge.classList.add("badge-warn");
+                icon.innerText = "⚠";
+                text.innerText = "DOUBLON DÉTECTÉ";
+            } else {
+                badge.classList.add("badge-warn");
+                icon.innerText = "?";
+                text.innerText = "À VÉRIFIER";
+            }
+
+            // Gestion Multi-pages
+            const mpBanner = document.getElementById('multipageBanner');
+            const mpText = document.getElementById('multipageText');
+            if (data.is_multipage) {
+                mpText.innerHTML = `<b>Facture multi-pages assemblée</b> (${data.pages_count || 2} pages réunies) • <b>${(data.serial_numbers || []).length}</b> S/N fusionnés`;
+                mpBanner.style.display = 'flex';
+            } else {
+                mpBanner.style.display = 'none';
+            }
+
+            // Gestion Numéros de série S/N
+            const snBox = document.getElementById('snBox');
+            const snTags = document.getElementById('snTags');
+            const snBanner = document.getElementById('snReconcilBanner');
+            snTags.innerHTML = "";
+
+            const serials = data.serial_numbers || [];
+            if (serials.length > 0) {
+                serials.forEach(sn => {
+                    const tag = document.createElement('div');
+                    tag.className = 'sn-tag';
+                    tag.innerText = "S/N: " + sn;
+                    snTags.appendChild(tag);
+                });
+
+                const reconcil = data.reconciliation || [];
+                if (reconcil.length > 0) {
+                    const first = reconcil[0];
+                    if (first.status === "RAPPROCHE") {
+                        snBanner.className = "reconcil-banner reconcil-ok";
+                        snBanner.innerText = "✔ Appareil rapproché avec la facture correspondante (" + first.diagnostic + ")";
+                    } else if (first.status === "NON_REFACTURE") {
+                        snBanner.className = "reconcil-banner reconcil-missing";
+                        snBanner.innerText = "🔴 Dépense fabricant enregistrée • En attente de la facture patient";
+                    } else {
+                        snBanner.className = "reconcil-banner reconcil-missing";
+                        snBanner.innerText = "🟡 Facture d'achat fabricant non archivée pour cet appareil";
+                    }
+                    snBanner.style.display = "block";
+                } else {
+                    snBanner.style.display = "none";
+                }
+                snBox.style.display = "block";
+            } else {
+                snBox.style.display = "none";
+            }
+
+            document.getElementById('valTtc').innerText = data.montant_ttc !== null ? data.montant_ttc.toFixed(2) + " €" : "-- €";
+            document.getElementById('valType').innerText = data.invoice_type === "CLIENT" ? "VENTE PATIENT" : "ACHAT FABRICANT";
+            document.getElementById('valNum').innerText = data.numero_facture || "Non détecté";
+            document.getElementById('valDate').innerText = data.date_facture || "Non détectée";
+            document.getElementById('valHt').innerText = data.montant_ht !== null ? data.montant_ht.toFixed(2) + " €" : "-- €";
+            document.getElementById('valTva').innerText = data.montant_tva !== null ? data.montant_tva.toFixed(2) + " €" : "-- €";
+            document.getElementById('valTiers').innerText = (data.invoice_type === "CLIENT" ? data.patient_nom : data.fournisseur_nom) || "Non identifié";
+            document.getElementById('valSiret').innerText = data.siret || (data.siren ? "SIREN: " + data.siren : "Absent");
+
+            const errorAlert = document.getElementById('errorAlert');
+            const errorList = document.getElementById('errorList');
+            errorList.innerHTML = "";
+
+            if (data.error_details && data.error_details.length > 0) {
+                data.error_details.forEach(err => {
+                    const li = document.createElement('li');
+                    li.innerText = err;
+                    errorList.appendChild(li);
+                });
+                errorAlert.style.display = 'block';
+            } else {
+                errorAlert.style.display = 'none';
+            }
+
+            resultBox.style.display = 'block';
+            resultBox.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function loadReconciliationData() {
+            const list = document.getElementById('recList');
+            const summary = document.getElementById('recSummary');
+            list.innerHTML = "<div style='text-align:center; padding:20px;'>Chargement...</div>";
+
+            try {
+                const res = await fetch('/api/reconciliation');
+                const data = await res.json();
+                const kpi = data.kpi;
+                const items = data.items;
+
+                summary.innerHTML = `
+                    <b>${kpi.rapproches_count} / ${kpi.total_serials_detected}</b> appareils rapprochés (${kpi.taux_couverture} %)<br>
+                    <span style="color:${kpi.non_refactures_count > 0 ? '#b91c1c' : '#15803d'}; font-weight:700;">
+                        ${kpi.non_refactures_count} appareil(s) non refacturé(s) (${kpi.volume_dépenses_orphelines.toFixed(2)} €)
+                    </span>
+                `;
+
+                list.innerHTML = "";
+                if (items.length === 0) {
+                    list.innerHTML = "<div style='text-align:center; padding:16px; color:#64748b;'>Aucune prothèse auditive détectée pour l'instant.</div>";
+                    return;
+                }
+
+                items.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = "rec-item";
+
+                    let pillClass = "pill-rapproche";
+                    let pillText = "✔ RAPPROCHÉ";
+                    if (item.status === "NON_REFACTURE") {
+                        pillClass = "pill-non-refacture";
+                        pillText = "✘ NON REFACTURÉ";
+                    } else if (item.status === "ACHAT_NON_TROUVE") {
+                        pillClass = "pill-achat-manquant";
+                        pillText = "⚠ ACHAT MANQUANT";
+                    }
+
+                    div.innerHTML = `
+                        <div class="rec-header">
+                            <span class="rec-sn">🦻 S/N: ${item.serial_number}</span>
+                            <span class="rec-pill ${pillClass}">${pillText}</span>
+                        </div>
+                        <div class="rec-row">
+                            <span class="rec-label">Achat Fabricant:</span>
+                            <span>${item.fournisseur_nom} (${item.achat_prix_ttc ? item.achat_prix_ttc.toFixed(2) + ' €' : '-'})</span>
+                        </div>
+                        <div class="rec-row">
+                            <span class="rec-label">Vente Patient:</span>
+                            <span>${item.patient_nom} (${item.vente_prix_ttc ? item.vente_prix_ttc.toFixed(2) + ' €' : '-'})</span>
+                        </div>
+                        <div class="rec-row" style="margin-top:6px; font-weight:700;">
+                            <span class="rec-label">Diagnostic:</span>
+                            <span>${item.diagnostic}</span>
+                        </div>
+                    `;
+                    list.appendChild(div);
+                });
+
+            } catch (err) {
+                list.innerHTML = "<div style='color:red;'>Erreur de chargement.</div>";
+            }
+        }
+    </script>
+</body>
+</html>
