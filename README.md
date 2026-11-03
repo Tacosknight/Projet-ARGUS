@@ -1,4 +1,4 @@
-# Facture-Checker 📑🔍 & Rapprochement Prothèses Auditives (S/N)
+# Facture-Checker & Rapprochement Prothèses Auditives (S/N)
 
 Application locale, modulaire et déterministe (sans LLM) d'audit, d'extraction OCR et de validation financière et légale de factures photographiées par smartphone.
 
@@ -6,7 +6,7 @@ Application locale, modulaire et déterministe (sans LLM) d'audit, d'extraction 
 
 ---
 
-## 🏗️ Architecture du Projet
+## Architecture du Projet
 
 ```text
 facture-checker/
@@ -38,15 +38,15 @@ facture-checker/
 
 ---
 
-## 🚀 Lancement Rapide (1-Clic)
+## Lancement Rapide (1-Clic)
 
-### 🐧 Sous Linux / macOS
+### Sous Linux / macOS
 Double-cliquez ou lancez dans le terminal :
 ```bash
 ./lancer_serveur_linux.sh
 ```
 
-### 🪟 Sous Windows
+### Sous Windows
 Double-cliquez simplement sur :
 ```cmd
 lancer_serveur_windows.bat
@@ -55,7 +55,7 @@ lancer_serveur_windows.bat
 
 ---
 
-## 📱 Mode Mobile (Utilisation depuis Smartphone)
+## Mode Mobile (Utilisation depuis Smartphone)
 
 Vous pouvez utiliser votre smartphone comme scanner avec l'appareil photo intégré grâce à l'interface Web mobile locale :
 
@@ -75,7 +75,7 @@ python server.py
 
 ---
 
-## 💻 Utilisation Classique en Ligne de Commande (Batch)
+## Utilisation Classique en Ligne de Commande (Batch)
 Pour tester immédiatement l'ensemble des cas d'audit (facture valide, erreur arithmétique, SIRET invalide, déformation perspective smartphone, doublon) :
 ```bash
 python generate_test_samples.py
@@ -104,7 +104,7 @@ python main.py --input-dir /chemin/vers/photos --output-excel rapport_audit.xlsx
 
 ---
 
-## ⚙️ Spécifications Fonctionnelles & Modules
+## Spécifications Fonctionnelles & Modules
 
 ### 1. `core/preprocessor.py` (Vision par ordinateur)
 - **Redimensionnement à 1600 px de hauteur** pour normaliser l'échelle tout en préservant le ratio d'aspect.
