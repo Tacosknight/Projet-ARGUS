@@ -53,6 +53,26 @@ class ReconciliationEngine:
                 - "items": Liste des appareils rapprochés avec détails financiers
                 - "kpi": Métriques synthétiques (taux de couverture, volume orphelin, marge)
         """
+        # Helper pour récupérer le produit associé à un S/N dans une facture
+        def get_sn_product(inv: Dict[str, Any], target_sn: str) -> str:
+            # Recherche dans product_items si présent
+            for it in inv.get("product_items") or []:
+                if str(it.get("serial_number", "")).strip().upper() == target_sn:
+                    return it.get("product_name", "")
+            # Recherche dans product_names
+            p_names = inv.get("product_names") or []
+            if isinstance(p_names, str):
+                import json
+                try:
+                    p_names = json.loads(p_names)
+                except Exception:
+                    p_names = [p_names] if p_names else []
+            if len(p_names) == 1:
+                return p_names[0]
+            elif p_names:
+                return ", ".join(p_names)
+            return ""
+
         # 1. Indexation des S/N côté Fournisseurs (Achats)
         # S/N -> Liste d'entrées d'achat
         purchases_by_sn: Dict[str, List[Dict[str, Any]]] = {}
@@ -78,6 +98,7 @@ class ReconciliationEngine:
                     purchases_by_sn[norm_sn] = []
                 purchases_by_sn[norm_sn].append({
                     "invoice": inv,
+                    "product_name": get_sn_product(inv, norm_sn),
                     "unit_ht": unit_ht,
                     "unit_ttc": unit_ttc,
                 })
@@ -106,6 +127,7 @@ class ReconciliationEngine:
                     sales_by_sn[norm_sn] = []
                 sales_by_sn[norm_sn].append({
                     "invoice": inv,
+                    "product_name": get_sn_product(inv, norm_sn),
                     "unit_ht": unit_ht,
                     "unit_ttc": unit_ttc,
                 })
@@ -160,6 +182,7 @@ class ReconciliationEngine:
 
                 reconciled_items.append({
                     "serial_number": p_sn,
+                    "produit_nom": p_item.get("product_name") or s_item.get("product_name") or "-",
                     "status": self.STATUS_RAPPROCHE,
                     "diagnostic": diagnostic,
                     "fournisseur_nom": p_inv.get("fournisseur_nom") or "Fabricant",
@@ -189,8 +212,9 @@ class ReconciliationEngine:
 
                 reconciled_items.append({
                     "serial_number": p_sn,
+                    "produit_nom": p_item.get("product_name") or "-",
                     "status": self.STATUS_NON_REFACTURE,
-                    "diagnostic": "🔴 DÉPENSE NON REFACTURÉE (Aucune facture patient trouvée)",
+                    "diagnostic": "Dépense non refacturée (aucune facture patient trouvée)",
                     "fournisseur_nom": p_inv.get("fournisseur_nom") or "Fabricant",
                     "achat_num_facture": p_inv.get("numero_facture"),
                     "achat_date": p_inv.get("date_facture"),
@@ -219,15 +243,16 @@ class ReconciliationEngine:
 
             reconciled_items.append({
                 "serial_number": s_sn,
+                "produit_nom": s_item.get("product_name") or "-",
                 "status": self.STATUS_ACHAT_MANQUANT,
-                "diagnostic": "🟡 FACTURE ACHAT FABRICANT NON TROUVÉE",
-                "fournisseur_nom": "Inconnu",
+                "diagnostic": "Facture d'achat fabricant non archivée pour cet appareil",
+                "fournisseur_nom": s_inv.get("fournisseur_nom") or "Non archivé",
                 "achat_num_facture": "-",
                 "achat_date": "-",
                 "achat_prix_ht": None,
                 "achat_prix_ttc": None,
                 "achat_fichier": None,
-                "patient_nom": s_inv.get("patient_nom") or "Patient",
+                "patient_nom": s_inv.get("patient_nom") or "Non renseigné",
                 "vente_num_facture": s_inv.get("numero_facture"),
                 "vente_date": s_inv.get("date_facture"),
                 "vente_prix_ht": prix_vente_ht,

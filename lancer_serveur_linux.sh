@@ -31,4 +31,4 @@ fi
 
 # Lancement du serveur avec l'environnement virtuel
 echo "🚀 Lancement du serveur web..."
-PYTHONPATH="facture-checker" ./venv/bin/python3 server.py
+PYTHONPATH="venv/lib/python3.12/site-packages:facture-checker" ./venv/bin/python3 server.py

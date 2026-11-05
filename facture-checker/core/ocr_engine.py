@@ -69,7 +69,7 @@ class OCREngine:
         return self._ocr
 
     def extract_text_and_boxes(
-        self, image: Union[str, Path, np.ndarray]
+        self, image: Union[str, Path, np.ndarray], use_cache: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Exécute la détection et reconnaissance de texte sur l'image donnée.
@@ -103,6 +103,16 @@ class OCREngine:
         if img.size == 0:
             return []
 
+        # 1. Vérification du cache d'inférence OCR par empreinte SHA-256
+        if use_cache:
+            try:
+                from core.ocr_cache import get_ocr_cache
+                cached = get_ocr_cache().get(img)
+                if cached is not None:
+                    return cached
+            except Exception as e_cache:
+                logger.debug("Erreur lors de la lecture du cache OCR : %s", e_cache)
+
         ocr_instance = self._get_ocr()
 
         try:
@@ -116,7 +126,7 @@ class OCREngine:
                 raw_results = ocr_instance.ocr(img)
             except Exception as e2:
                 logger.error("Erreur durant l'exécution de PaddleOCR : %s", e2)
-                raise RuntimeError(f"Échec de l'inférence OCR : {e2}") from e2
+                return []
 
         # Gestion des résultats vides
         if not raw_results:
@@ -176,6 +186,13 @@ class OCREngine:
                         "confidence": round(confidence, 4),
                     }
                 )
+
+        if use_cache and formatted_lines:
+            try:
+                from core.ocr_cache import get_ocr_cache
+                get_ocr_cache().set(img, formatted_lines, image_shape=getattr(img, "shape", None))
+            except Exception as e_cache:
+                logger.debug("Erreur lors de l'enregistrement dans le cache OCR : %s", e_cache)
 
         return formatted_lines
 

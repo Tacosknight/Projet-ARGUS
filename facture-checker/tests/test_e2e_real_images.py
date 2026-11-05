@@ -26,6 +26,10 @@ IMG_PAGE2 = ARTIFACTS_DIR / "media_1793635368777_1aec294b.jpg"
 IMG_PATIENT = ARTIFACTS_DIR / "media_1793635368783_5eab80b2.jpg"
 
 
+@unittest.skipUnless(
+    IMG_PAGE1.exists() and IMG_PAGE2.exists() and IMG_PATIENT.exists(),
+    "Échantillons d'images locales non disponibles sur cette machine (environnement CI / clone GitHub)",
+)
 class TestEndToEndRealInvoices(unittest.TestCase):
 
     def setUp(self):

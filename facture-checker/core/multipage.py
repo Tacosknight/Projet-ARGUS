@@ -22,16 +22,16 @@ def detect_pagination(text: str) -> Tuple[int, int]:
 
     # 1. Vérification prioritaire dans les 10 dernières lignes (emplacement classique)
     for line in reversed(lines[-10:]):
-        m = re.search(r"\b([1-9])\s*[/]\s*([1-9])\b", line)
+        m = re.search(r"page\s*(?:no\.?|n[°o*])?\s*(\d{1,3})\s*(?:sur|/|de)\s*(\d{1,3})", line, re.IGNORECASE)
         if m:
             cur, tot = int(m.group(1)), int(m.group(2))
-            if cur <= tot:
+            if cur <= tot and tot > 0:
                 return cur, tot
 
-        m2 = re.search(r"page\s*([1-9])\s*(?:sur|/)\s*([1-9])", line, re.IGNORECASE)
-        if m2:
-            cur, tot = int(m2.group(1)), int(m2.group(2))
-            if cur <= tot:
+        m_slash = re.search(r"\b(\d{1,3})\s*[/]\s*(\d{1,3})\b", line)
+        if m_slash:
+            cur, tot = int(m_slash.group(1)), int(m_slash.group(2))
+            if cur <= tot and tot > 0:
                 return cur, tot
 
         # Si OCR a omis le slash (ex: "22" ou "2 2" ou "12" sur la fin du document)
@@ -43,16 +43,16 @@ def detect_pagination(text: str) -> Tuple[int, int]:
                     return cur, tot
 
     # 2. Recherche générale dans tout le document
-    m = re.search(r"\b([1-9])\s*[/]\s*([1-9])\b", text)
+    m = re.search(r"page\s*(?:no\.?|n[°o*])?\s*(\d{1,3})\s*(?:sur|/|de)\s*(\d{1,3})", text, re.IGNORECASE)
     if m:
         cur, tot = int(m.group(1)), int(m.group(2))
-        if cur <= tot:
+        if cur <= tot and tot > 0:
             return cur, tot
 
-    m2 = re.search(r"page\s*([1-9])\s*(?:sur|/)\s*([1-9])", text, re.IGNORECASE)
-    if m2:
-        cur, tot = int(m2.group(1)), int(m2.group(2))
-        if cur <= tot:
+    m_slash = re.search(r"\b(\d{1,3})\s*[/]\s*(\d{1,3})\b", text)
+    if m_slash:
+        cur, tot = int(m_slash.group(1)), int(m_slash.group(2))
+        if cur <= tot and tot > 0:
             return cur, tot
 
     return 1, 1
@@ -174,6 +174,17 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             if s and str(s).strip():
                 all_serials.add(str(s).strip().upper())
 
+    # Fusion des produits et modèles
+    all_product_names: List[str] = []
+    all_product_items: List[Dict[str, Any]] = []
+    for p in sorted_pages:
+        for p_name in p.get("product_names") or []:
+            if p_name and p_name not in all_product_names:
+                all_product_names.append(p_name)
+        for item in p.get("product_items") or []:
+            if item not in all_product_items:
+                all_product_items.append(item)
+
     # Totaux financiers :
     # Si la dernière page contient un total explicite (HT et TTC), on prend ces totaux officiels certifiés
     montant_ht = None
@@ -232,6 +243,8 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         "fournisseur_nom": fournisseur_nom,
         "patient_nom": patient_nom,
         "serial_numbers": sorted(list(all_serials)),
+        "product_names": all_product_names,
+        "product_items": all_product_items,
         "raw_text": combined_raw_text,
         "is_multipage": len(sorted_pages) > 1,
         "pages_count": len(sorted_pages),

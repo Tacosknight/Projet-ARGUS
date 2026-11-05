@@ -60,6 +60,7 @@ class InvoiceDatabase:
                     fournisseur_nom TEXT,
                     patient_nom TEXT,
                     serial_numbers TEXT,
+                    product_names TEXT,
                     status TEXT NOT NULL,
                     error_details TEXT,
                     unique_hash TEXT UNIQUE,
@@ -75,6 +76,8 @@ class InvoiceDatabase:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN invoice_type TEXT DEFAULT 'FOURNISSEUR';")
             if "serial_numbers" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN serial_numbers TEXT;")
+            if "product_names" not in existing_cols:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN product_names TEXT;")
             if "patient_nom" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN patient_nom TEXT;")
 
@@ -121,6 +124,12 @@ class InvoiceDatabase:
         else:
             serial_numbers_str = str(serials or "[]")
 
+        products = data.get("product_names", [])
+        if isinstance(products, list):
+            product_names_str = json.dumps(products, ensure_ascii=False)
+        else:
+            product_names_str = str(products or "[]")
+
         created_at = data.get("created_at") or datetime.now().isoformat()
         unique_hash = data.get("unique_hash")
         status = data.get("status", "A_VERIFIER")
@@ -148,12 +157,13 @@ class InvoiceDatabase:
                     fournisseur_nom,
                     patient_nom,
                     serial_numbers,
+                    product_names,
                     status,
                     error_details,
                     unique_hash,
                     created_at,
                     raw_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(unique_hash) DO UPDATE SET
                     filename = excluded.filename,
                     invoice_type = excluded.invoice_type,
@@ -163,6 +173,7 @@ class InvoiceDatabase:
                     montant_tva = excluded.montant_tva,
                     montant_ttc = excluded.montant_ttc,
                     serial_numbers = excluded.serial_numbers,
+                    product_names = excluded.product_names,
                     patient_nom = excluded.patient_nom,
                     created_at = excluded.created_at,
                     raw_text = excluded.raw_text;
@@ -181,6 +192,7 @@ class InvoiceDatabase:
                     data.get("fournisseur_nom"),
                     data.get("patient_nom") or data.get("client_nom"),
                     serial_numbers_str,
+                    product_names_str,
                     status,
                     error_details_str,
                     storage_hash,
@@ -203,6 +215,11 @@ class InvoiceDatabase:
                 if item.get("serial_numbers"):
                     try:
                         item["serial_numbers"] = json.loads(item["serial_numbers"])
+                    except Exception:
+                        pass
+                if item.get("product_names"):
+                    try:
+                        item["product_names"] = json.loads(item["product_names"])
                     except Exception:
                         pass
                 if item.get("page_current") is None or item.get("page_total") is None:
@@ -231,8 +248,84 @@ class InvoiceDatabase:
                         item["serial_numbers"] = json.loads(item["serial_numbers"])
                     except Exception:
                         pass
+                if item.get("product_names"):
+                    try:
+                        item["product_names"] = json.loads(item["product_names"])
+                    except Exception:
+                        pass
                 results.append(item)
             return results
+
+    def get_invoice_by_id(self, invoice_id: int) -> Optional[Dict[str, Any]]:
+        """Retourne une facture par son ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM invoices WHERE id = ? LIMIT 1;", (invoice_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            item = dict(row)
+            if item.get("serial_numbers"):
+                try:
+                    item["serial_numbers"] = json.loads(item["serial_numbers"])
+                except Exception:
+                    pass
+            if item.get("product_names"):
+                try:
+                    item["product_names"] = json.loads(item["product_names"])
+                except Exception:
+                    pass
+            return item
+
+    def update_invoice(self, invoice_id: int, updates: Dict[str, Any]) -> bool:
+        """
+        Met à jour les champs modifiables d'une facture par son ID.
+        Permet l'édition manuelle Human-in-the-Loop depuis l'interface mobile / web.
+        """
+        allowed_fields = [
+            "numero_facture",
+            "date_facture",
+            "montant_ht",
+            "montant_tva",
+            "montant_ttc",
+            "fournisseur_nom",
+            "patient_nom",
+            "invoice_type",
+            "serial_numbers",
+            "product_names",
+            "status",
+            "error_details",
+        ]
+
+        set_clauses = []
+        values = []
+
+        for key, val in updates.items():
+            if key not in allowed_fields:
+                continue
+
+            if key in ["serial_numbers", "error_details", "product_names"] and isinstance(val, (list, dict)):
+                val = json.dumps(val, ensure_ascii=False)
+            elif key in ["montant_ht", "montant_tva", "montant_ttc"] and val is not None:
+                try:
+                    val = float(str(val).replace(",", ".").replace("€", "").strip())
+                except (ValueError, TypeError):
+                    pass
+
+            set_clauses.append(f"{key} = ?")
+            values.append(val)
+
+        if not set_clauses:
+            return False
+
+        values.append(invoice_id)
+        query = f"UPDATE invoices SET {', '.join(set_clauses)} WHERE id = ?;"
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(values))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def delete_invoice(self, invoice_id: int) -> bool:
         """Supprime une facture de la base par son ID."""
@@ -241,6 +334,15 @@ class InvoiceDatabase:
             cursor.execute("DELETE FROM invoices WHERE id = ?;", (invoice_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def clear_all_invoices(self) -> int:
+        """Supprime toutes les factures de la base de données."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM invoices;")
+            count = cursor.rowcount
+            conn.commit()
+            return count
 
     def get_invoices_df(self) -> pd.DataFrame:
         """Retourne toutes les factures sous forme de DataFrame pandas."""
@@ -253,8 +355,24 @@ def init_db(db_path: str = DEFAULT_DB_PATH) -> None:
     InvoiceDatabase(db_path).init_db()
 
 
+def delete_invoice(invoice_id: int, db_path: str = DEFAULT_DB_PATH) -> bool:
+    return InvoiceDatabase(db_path).delete_invoice(invoice_id)
+
+
+def clear_all_invoices(db_path: str = DEFAULT_DB_PATH) -> int:
+    return InvoiceDatabase(db_path).clear_all_invoices()
+
+
 def save_invoice(data: Dict[str, Any], db_path: str = DEFAULT_DB_PATH) -> int:
     return InvoiceDatabase(db_path).save_invoice(data)
+
+
+def update_invoice(invoice_id: int, updates: Dict[str, Any], db_path: str = DEFAULT_DB_PATH) -> bool:
+    return InvoiceDatabase(db_path).update_invoice(invoice_id, updates)
+
+
+def get_invoice_by_id(invoice_id: int, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    return InvoiceDatabase(db_path).get_invoice_by_id(invoice_id)
 
 
 def is_hash_exists(unique_hash: str, db_path: str = DEFAULT_DB_PATH) -> bool:

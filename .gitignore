@@ -1,20 +1,53 @@
-cat << 'EOF' > .gitignore
-# Environnement virtuel Python
+# ==========================================
+# Environnements virtuels Python
+# ==========================================
 venv/
 .venv/
 env/
+ENV/
 
-# Fichiers compilés / caches
+# ==========================================
+# Fichiers compilés & Caches Python
+# ==========================================
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Modèles PaddleOCR
+# ==========================================
+# Modèles PaddleOCR & Caches IA
+# ==========================================
 .paddleocr/
+.paddlex/
 
-# Fichiers de données et exports
+# ==========================================
+# Bases de données locales & Exports (RGPD / Données médicales)
+# ==========================================
+*.db
+*.sqlite
+*.sqlite3
 storage/*.db
 storage/*.sqlite
 *.xlsx
+*.xls
+*.csv
+
+# ==========================================
+# Pièces comptables & Scans uploadés (Factures patients & fournisseurs)
+# ==========================================
 input_photos/*
 !input_photos/.gitkeep
-EOF
+facture-checker/input_photos/*
+!facture-checker/input_photos/.gitkeep
+
+# ==========================================
+# Outils locaux & fichiers système
+# ==========================================
+.agents/
+skills-lock.json
+.DS_Store
+Thumbs.db
+*.log

@@ -213,14 +213,14 @@ def _build_kpi_sheet(ws, invoices: List[Dict[str, Any]], rec_kpi: Dict[str, Any]
     total_count = len(invoices)
     valides = sum(1 for i in invoices if (i.get("status") or "").upper() == "VALIDE")
     erreurs_calc = sum(1 for i in invoices if (i.get("status") or "").upper() == "ERREUR_CALCUL")
-    siret_inval = sum(1 for i in invoices if (i.get("status") or "").upper() == "SIRET_INVALIDE")
     doublons = sum(1 for i in invoices if (i.get("status") or "").upper() == "DOUBLON")
+    a_verifier = sum(1 for i in invoices if (i.get("status") or "").upper() in ("A_VERIFIER", "SIRET_INVALIDE"))
 
     kpi_audit_items = [
         ("Nombre Total de Factures Scannées", total_count, "center", "#,##0"),
         ("Factures Conformes (VALIDE)", valides, "center", "#,##0"),
         ("Erreurs Arithmétiques (ERREUR_CALCUL)", erreurs_calc, "center", "#,##0"),
-        ("Anomalies Légales (SIRET/SIREN Invalide)", siret_inval, "center", "#,##0"),
+        ("Factures À Vérifier (A_VERIFIER)", a_verifier, "center", "#,##0"),
         ("Doublons Détectés (DOUBLON)", doublons, "center", "#,##0"),
     ]
 
@@ -252,19 +252,22 @@ def _build_reconciliation_sheet(ws, items: List[Dict[str, Any]], border_all: Bor
 
     columns = [
         ("N° Série (S/N)", 18, "center", "@"),
+        ("Appareil / Modèle", 25, "left", "@"),
         ("Statut Rapprochement", 20, "center", "@"),
         ("Diagnostic & Écart", 35, "left", "@"),
         ("Fabricant / Fournisseur", 22, "left", "@"),
         ("N° Facture Achat", 16, "center", "@"),
         ("Date Achat", 13, "center", "YYYY-MM-DD"),
+        ("Prix Achat HT", 15, "right", '#,##0.00 "€"'),
         ("Prix Achat TTC", 15, "right", '#,##0.00 "€"'),
         ("Patient / Client", 22, "left", "@"),
         ("N° Facture Vente", 16, "center", "@"),
         ("Date Vente", 13, "center", "YYYY-MM-DD"),
+        ("Prix Vente HT", 15, "right", '#,##0.00 "€"'),
         ("Prix Vente TTC", 15, "right", '#,##0.00 "€"'),
-        ("Écart / Marge (€)", 16, "right", '#,##0.00 "€"'),
-        ("Fichier Achat", 22, "left", "@"),
-        ("Fichier Vente", 22, "left", "@"),
+        ("Écart / Marge TTC", 16, "right", '#,##0.00 "€"'),
+        ("Fichier Achat", 24, "left", "@"),
+        ("Fichier Vente", 24, "left", "@"),
     ]
 
     header_font = Font(name="Calibri", size=11, bold=True, color=COLOR_HEADER_FG)
@@ -284,19 +287,28 @@ def _build_reconciliation_sheet(ws, items: List[Dict[str, Any]], border_all: Bor
         status = item.get("status", "ACHAT_NON_TROUVE")
         style = get_status_style(status)
 
+        achat_ht = item.get("achat_prix_ht")
+        achat_ttc = item.get("achat_prix_ttc")
+        vente_ht = item.get("vente_prix_ht")
+        vente_ttc = item.get("vente_prix_ttc")
+        ecart = item.get("ecart_ttc")
+
         row_values = [
             item.get("serial_number"),
+            item.get("produit_nom") or "-",
             status,
             item.get("diagnostic"),
             item.get("fournisseur_nom") or "-",
             item.get("achat_num_facture") or "-",
             item.get("achat_date") or "-",
-            item.get("achat_prix_ttc"),
+            achat_ht if achat_ht is not None else "-",
+            achat_ttc if achat_ttc is not None else "-",
             item.get("patient_nom") or "-",
             item.get("vente_num_facture") or "-",
             item.get("vente_date") or "-",
-            item.get("vente_prix_ttc"),
-            item.get("ecart_ttc"),
+            vente_ht if vente_ht is not None else "-",
+            vente_ttc if vente_ttc is not None else "-",
+            ecart if ecart is not None else "-",
             item.get("achat_fichier") or "-",
             item.get("vente_fichier") or "-",
         ]
@@ -307,13 +319,18 @@ def _build_reconciliation_sheet(ws, items: List[Dict[str, Any]], border_all: Bor
             col_number_format = columns[col_idx - 1][3]
 
             cell.fill = style["fill"]
-            if col_idx == 2:  # Statut
+            if col_idx == 3:  # Statut
                 cell.font = style["font"]
             else:
                 cell.font = Font(name="Calibri", size=10)
 
             cell.alignment = Alignment(horizontal=col_align_h, vertical="center")
-            cell.number_format = col_number_format
+            if isinstance(val, (int, float)):
+                cell.number_format = col_number_format
+            else:
+                cell.number_format = "@"
+                if val == "-":
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = border_all
 
     for col_idx, (_, default_width, _, _) in enumerate(columns, start=1):
@@ -328,21 +345,21 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
     ws.views.sheetView[0].showGridLines = True
 
     columns = [
-        ("ID", 7, "center", "@"),
-        ("Type", 14, "center", "@"),
-        ("Fichier Source", 25, "left", "@"),
-        ("Tiers (Fournisseur/Patient)", 24, "left", "@"),
+        ("N°", 6, "center", "@"),
+        ("Type de Facture", 16, "center", "@"),
         ("N° Facture", 16, "center", "@"),
-        ("Date Émission", 13, "center", "YYYY-MM-DD"),
-        ("N° Série (S/N)", 22, "center", "@"),
-        ("SIRET", 17, "center", "@"),
+        ("Date Émission", 14, "center", "YYYY-MM-DD"),
+        ("Fabricant / Fournisseur", 24, "left", "@"),
+        ("Patient / Client", 24, "left", "@"),
+        ("Appareils Détectés (S/N)", 26, "center", "@"),
+        ("Produits / Modèles", 26, "left", "@"),
         ("Montant HT", 15, "right", '#,##0.00 "€"'),
         ("Montant TVA", 15, "right", '#,##0.00 "€"'),
         ("Montant TTC", 15, "right", '#,##0.00 "€"'),
         ("Statut Audit", 16, "center", "@"),
-        ("Anomalies / Détails", 38, "left", "@"),
-        ("Hash SHA-256", 18, "center", "@"),
-        ("Traité le", 17, "center", "YYYY-MM-DD HH:MM"),
+        ("Observations / Détails", 40, "left", "@"),
+        ("Fichier Source", 28, "left", "@"),
+        ("Date Numérisation", 18, "center", "YYYY-MM-DD HH:MM"),
     ]
 
     header_font = Font(name="Calibri", size=11, bold=True, color=COLOR_HEADER_FG)
@@ -365,30 +382,48 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
         error_text = format_error_details(inv.get("error_details"))
         serials_text = format_serials_display(inv.get("serial_numbers"))
 
+        prod_names = inv.get("product_names") or []
+        if isinstance(prod_names, str):
+            import json
+            try:
+                prod_names = json.loads(prod_names)
+            except Exception:
+                prod_names = [prod_names]
+        products_text = ", ".join(prod_names) if isinstance(prod_names, list) else str(prod_names)
+
         created_at_raw = inv.get("created_at", "")
         if created_at_raw and "T" in created_at_raw:
             created_at_fmt = created_at_raw.replace("T", " ")[:16]
         else:
-            created_at_fmt = str(created_at_raw)
+            created_at_fmt = str(created_at_raw)[:16]
 
-        inv_type = (inv.get("invoice_type") or "FOURNISSEUR").upper()
-        tiers_nom = inv.get("patient_nom") if inv_type == "CLIENT" else inv.get("fournisseur_nom")
+        raw_type = (inv.get("invoice_type") or "FOURNISSEUR").upper()
+        type_display = "Vente Patient" if raw_type == "CLIENT" else "Achat Fabricant"
+
+        fournisseur_disp = inv.get("fournisseur_nom") or "-"
+        patient_disp = inv.get("patient_nom") or "-"
+        num_fac_disp = inv.get("numero_facture") or "-"
+        date_fac_disp = inv.get("date_facture") or "-"
+
+        m_ht = inv.get("montant_ht")
+        m_tva = inv.get("montant_tva")
+        m_ttc = inv.get("montant_ttc")
 
         row_values = [
             inv.get("id", row_idx - 1),
-            inv_type,
-            inv.get("filename", ""),
-            tiers_nom or "Non renseigné",
-            inv.get("numero_facture", "") or "Inconnu",
-            inv.get("date_facture", "") or "",
+            type_display,
+            num_fac_disp,
+            date_fac_disp,
+            fournisseur_disp,
+            patient_disp,
             serials_text or "-",
-            inv.get("siret", "") or "Absent",
-            inv.get("montant_ht"),
-            inv.get("montant_tva"),
-            inv.get("montant_ttc"),
+            products_text or "-",
+            m_ht if m_ht is not None else "-",
+            m_tva if m_tva is not None else "-",
+            m_ttc if m_ttc is not None else "-",
             status,
-            error_text,
-            (inv.get("unique_hash") or "")[:14] + "...",
+            error_text or "Conforme",
+            inv.get("filename", ""),
             created_at_fmt,
         ]
 
@@ -398,13 +433,18 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
             col_number_format = columns[col_idx - 1][3]
 
             cell.fill = style["fill"]
-            if col_idx == 12:
+            if col_idx == 12:  # Statut
                 cell.font = style["font"]
             else:
                 cell.font = Font(name="Calibri", size=10)
 
             cell.alignment = Alignment(horizontal=col_align_h, vertical="center", wrap_text=(col_idx == 13))
-            cell.number_format = col_number_format
+            if isinstance(val, (int, float)):
+                cell.number_format = col_number_format
+            else:
+                cell.number_format = "@"
+                if val == "-":
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.border = border_all
 
     for col_idx, (_, default_width, _, _) in enumerate(columns, start=1):
@@ -413,3 +453,4 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
     if invoices:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(columns))}{len(invoices) + 1}"
     ws.freeze_panes = "A2"
+

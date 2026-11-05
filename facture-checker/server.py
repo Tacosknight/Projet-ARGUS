@@ -63,7 +63,7 @@ def main() -> None:
         host="0.0.0.0",
         port=port,
         log_level="info",
-        reload=False,
+        reload=True,
     )
 
 

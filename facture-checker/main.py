@@ -205,7 +205,8 @@ def run_batch_processing(
     validator = InvoiceValidator(db_is_duplicate_fn=db.is_hash_exists)
 
     print(f"{ANSI_GRAY}Initialisation du moteur PaddleOCR (Français)...{ANSI_RESET}")
-    ocr_engine = OCREngine(lang="fr", use_angle_cls=True, show_log=False)
+    ocr_engine = OCREngine(lang="fr", show_log=False)
+
 
     debug_dir = (input_dir / "debug_preprocessed") if save_debug else None
 

@@ -250,8 +250,8 @@ def apply_adaptive_filter(
 
 def preprocess_image(
     image_path: Union[str, Path, np.ndarray],
-    target_height: int = 1600,
-    apply_threshold: bool = True,
+    target_height: int = 2400,
+    apply_threshold: bool = False,
 ) -> np.ndarray:
     """
     Pipeline complet de pré-traitement d'une photo de facture :
