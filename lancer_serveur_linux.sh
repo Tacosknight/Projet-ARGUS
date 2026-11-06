@@ -29,6 +29,10 @@ if [ ! -d "venv" ]; then
     PYTHONPATH="" ./venv/bin/pip install -r requirements.txt
 fi
 
+# Ouverture automatique du navigateur web sur l'adresse locale
+echo "🌐 Ouverture automatique du navigateur sur http://localhost:8000..."
+(sleep 2 && (xdg-open "http://localhost:8000" 2>/dev/null || open "http://localhost:8000" 2>/dev/null || sensible-browser "http://localhost:8000" 2>/dev/null || true)) &
+
 # Lancement du serveur avec l'environnement virtuel
 echo "🚀 Lancement du serveur web..."
 PYTHONPATH="venv/lib/python3.12/site-packages:facture-checker" ./venv/bin/python3 server.py
