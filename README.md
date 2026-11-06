@@ -1,152 +1,265 @@
-# Facture-Checker & Rapprochement Prothèses Auditives (S/N)
+# ARGUS — Contrôle & Rapprochement de Factures (Audioprothèse)
 
-Application locale, modulaire et déterministe (sans LLM) d'audit, d'extraction OCR et de validation financière et légale de factures photographiées par smartphone.
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+[![Framework](https://img.shields.io/badge/framework-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![OCR Engine](https://img.shields.io/badge/OCR-PaddleOCR%20v2%2Fv3-red.svg)](https://github.com/PaddlePaddle/PaddleOCR)
+[![Database](https://img.shields.io/badge/database-SQLite%203-lightgrey.svg)](https://www.sqlite.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-informational.svg)](https://github.com/Tacosknight/Projet-ARGUS)
 
-**Spécificité Audioprothèse :** Rapprochement automatique des dépenses d'achats fabricants (Phonak, Oticon, Signia, Widex...) et des factures de vente patients via le **Numéro de Série unique (S/N)** de chaque aide auditive pour garantir l'équilibre financier et éliminer les oublis de refacturation.
+> Solution locale, modulaire et déterministe (sans LLM) d'audit documentaire, d'extraction OCR avec géométrie spatiale 2D, et de réconciliation bilatérale des aides auditives par numéro de série (S/N).
 
 ---
 
-## Architecture du Projet
+## Vue d'Ensemble
+
+Dans le secteur de l'audioprothèse, la gestion administrative repose sur un double flux documentaire : les **factures d'achats fabricants** (Phonak, Oticon, Signia, Widex, Starkey, GN ReSound, etc.) et les **factures de vente patients**. L'absence de réconciliation systématique engendre des pertes de marge, des oublis de refacturation d'appareils et des anomalies comptables.
+
+**ARGUS** automatise intégralement cette chaîne de contrôle :
+- **Audit comptable et légal** : Contrôle automatique du SIRET (Luhn), de la TVA intracommunautaire, de l'équilibre fiscal (HT + TVA = TTC) et détection des doublons.
+- **Rapprochement bilatéral par Numéro de Série (S/N)** : Appariement automatique entre les appareils achetés aux fabricants et les appareils facturés aux patients, avec calcul instantané des marges brutes.
+- **Traitement 100% local** : Aucune donnée médicale ou financière ne transite par le cloud. Fonctionne en circuit fermé pour une conformité totale au RGPD et au secret médical.
+
+> [!NOTE]
+> ARGUS n'utilise aucun modèle d'IA générative opaque (LLM). L'ensemble des décisions, calculs et extractions repose sur des règles déterministes, une géométrie cartésienne 2D et des algorithmes arithmétiques vérifiables.
+
+---
+
+## Fonctionnalités Clés
+
+- **Ingestion Multiformat & Multi-pages** :
+  - Prise en charge des photographies smartphone (JPG, PNG) et des documents PDF (vectoriels et numérisés multi-pages).
+  - Découpage automatique des pages PDF et consolidation sous forme d'une pièce comptable unique.
+- **Vision par Ordinateur & OCR Spatial 2D** :
+  - Détection automatique des 4 sommets et redressement géométrique par homographie.
+  - Binarisation adaptative supprimant les ombres et reflets de prise de vue.
+  - Extraction PaddleOCR avec coordonnées spatiales et cache d'empreintes SHA-256 pour éviter les recalculs superflus.
+- **Moteur de Parsing & Heuristiques Audioprothèse** :
+  - Extraction robuste des ancres textuelles par recherche floue (`thefuzz`) tolérante aux coquilles optiques.
+  - Détection fine des fabricants, des marques équivalentes (ex. Sonova/Phonak, Demant/Oticon) et des modèles d'aides auditives.
+  - Filtre spécialisé pour isoler les numéros de série (S/N) authentiques et écarter les codes-barres ou références accessoires.
+  - Module de post-correction optique rectifiant les confusions classiques (0/O, 1/I, virgules décimales).
+- **Rapprochement Bilatéral & Matrice de Marges** :
+  - Comparaison directe côte-à-côte (Fabricant vs Patient).
+  - Surlignage sémantique :
+    - Vert (Match) : Données conformes, S/N réconcilié, marge positive.
+    - Orange (Warning) : Tolérance floue sur le modèle ou TVA reconstituée.
+    - Rouge (Error) : Appareil non refacturé, vente à perte ou divergence arithmétique.
+- **Interface Web Mobile-First & Scanner Intégré** :
+  - Serveur local avec affichage d'un QR Code dans le terminal pour connexion smartphone instantanée en Wi-Fi.
+  - Déclenchement de la caméra mobile pour numériser directement les factures au comptoir.
+  - Registre interactif avec modale d'édition manuelle des champs détectés.
+- **Export Managérial Excel & Base SQLite** :
+  - Génération dynamique d'un classeur multi-onglets (Tableau de bord KPIs, Audit des prothèses S/N, Détail des factures avec mise en forme conditionnelle).
+  - Base SQLite locale persistante avec indexation optimisée.
+
+---
+
+## Architecture & Flux de Données
+
+```mermaid
+flowchart TD
+    subgraph Ingestion["1. Ingestion Documentaire"]
+        A1["Photo Smartphone (Caméra Web / PWA)"] --> B["Normalisation"]
+        A2["Fichiers Images (JPG, PNG)"] --> B
+        A3["Documents PDF (Multi-pages)"] --> B
+    end
+
+    subgraph Vision["2. Vision & OCR Spatial"]
+        B --> C["Détection Contours & Homographie 4 points"]
+        C --> D["Binarisation Adaptative"]
+        D --> E["PaddleOCR (Texte + Bounding Boxes 2D)"]
+        E --> F["Cache OCR (SHA-256)"]
+    end
+
+    subgraph Analyse["3. Extraction & Validation"]
+        F --> G["Parser Sémantique & Spatial"]
+        G --> H["Post-Correcteur Heuristique"]
+        H --> I["Contrôles d'Intégrité (Luhn, TVA, Équation, Doublons)"]
+    end
+
+    subgraph Rapprochement["4. Moteur Bilatéral"]
+        I --> J["Classification (Achat Fabricant vs Vente Patient)"]
+        J --> K["Moteur de Réconciliation par S/N"]
+        K --> L["Chiffrage des Marges & Alertes Refacturation"]
+    end
+
+    subgraph Restitution["5. Stockage & Restitution"]
+        L --> M[("Base SQLite indexée")]
+        L --> N["Export Excel Dynamique (KPIs & S/N)"]
+        L --> O["Interface Web / Tableau de Bord"]
+    end
+```
+
+---
+
+## Structure du Projet
 
 ```text
 facture-checker/
-│
 ├── core/
-│   ├── __init__.py
-│   ├── preprocessor.py       # Détection contours + homographie 4 points + binarisation adaptative
-│   ├── ocr_engine.py         # Wrapper PaddleOCR (texte + coordonnées spatiales)
-│   ├── parser.py             # Extraction champs + S/N aides auditives + détection Achat/Vente
+│   ├── preprocessor.py       # Détection contours, homographie 4 points et binarisation
+│   ├── ocr_engine.py         # Moteur PaddleOCR et conversion PDF multi-pages
+│   ├── ocr_cache.py          # Système de cache persistant des sorties OCR
+│   ├── multipage.py          # Découpage, consolidation et fusion multi-pages
+│   ├── parser.py             # Extraction champs, détection Achat/Vente et filtrage S/N
+│   ├── post_corrector.py     # Correction heuristique post-OCR (chiffres, SIRET, dates)
 │   ├── validator.py          # Contrôles d'intégrité (Luhn, TVA, équation fiscale, doublons)
-│   └── reconciliation.py     # Moteur de réconciliation Achats Fabricants ↔ Ventes Patients par S/N
+│   ├── reconciliation.py     # Moteur de réconciliation des prothèses par S/N
+│   └── comparator.py         # Comparateur bilatéral direct Fournisseur ↔ Client
 │
 ├── storage/
-│   ├── __init__.py
-│   ├── database.py           # Schéma et opérations CRUD SQLite (avec indexation S/N & type)
-│   └── export_excel.py       # Génération dynamique du classeur Excel (3 onglets: KPI, S/N, Détails)
+│   ├── database.py           # Couche d'accès SQLite et indexation
+│   └── export_excel.py       # Génération dynamique du rapport Excel avec styles conditionnels
 │
-├── web/                      # Interface Web Mobile-First (FastAPI + HTML5 Caméra)
-│   ├── app.py
-│   └── templates/index.html
+├── web/
+│   ├── app.py                # API REST FastAPI et contrôleurs
+│   └── templates/
+│       └── index.html        # Interface Web réactive (Scanner, Comparateur, Registre)
 │
-├── input_photos/             # Dossier source des photos de factures
-├── requirements.txt          # Dépendances Python testées et épinglées
-├── main.py                   # Point d'entrée CLI et orchestration batch
-├── server.py                 # Serveur mobile avec affichage de QR Code dans le terminal
-├── lancer_serveur_linux.sh   # Lanceur 1-clic pour Linux / macOS
-└── lancer_serveur_windows.bat# Lanceur 1-clic pour Windows
+├── tests/                    # Suite de tests unitaires et d'intégration
+├── input_photos/             # Répertoire d'entrée par défaut pour les images
+├── requirements.txt          # Dépendances Python épinglées
+├── main.py                   # Point d'entrée principal (CLI batch et mode web)
+├── server.py                 # Lanceur du serveur mobile avec QR Code terminal
+├── lancer_serveur_linux.sh   # Script de démarrage rapide 1-clic pour Linux / macOS
+└── lancer_serveur_windows.bat# Script de démarrage rapide 1-clic pour Windows
 ```
 
 ---
 
-## Lancement Rapide (1-Clic)
+## Démarrage Rapide
 
-### Sous Linux / macOS
-Double-cliquez ou lancez dans le terminal :
+### 1. Lancement 1-Clic
+
+Le moyen le plus simple de démarrer ARGUS est d'utiliser le lanceur correspondant à votre système :
+
+#### Sous Linux / macOS
 ```bash
+chmod +x lancer_serveur_linux.sh
 ./lancer_serveur_linux.sh
 ```
 
-### Sous Windows
-Double-cliquez simplement sur :
+#### Sous Windows
+Double-cliquez sur :
 ```cmd
 lancer_serveur_windows.bat
 ```
-*Le script configure automatiquement l'environnement virtuel Python, installe les dépendances si nécessaire et démarre le serveur web avec affichage d'un QR code pour votre smartphone.*
+
+> [!TIP]
+> Le script configure automatiquement l'environnement virtuel Python, installe les dépendances nécessaires et démarre le serveur web local.
 
 ---
 
-## Mode Mobile (Utilisation depuis Smartphone)
+### 2. Installation Manuelle
 
-Vous pouvez utiliser votre smartphone comme scanner avec l'appareil photo intégré grâce à l'interface Web mobile locale :
+Si vous préférez configurer l'environnement manuellement :
 
 ```bash
-# Lancer le serveur mobile
-python server.py
-# ou : python main.py --web
-```
+# Cloner le dépôt
+git clone https://github.com/Tacosknight/Projet-ARGUS.git
+cd Projet-ARGUS
 
-1. Le terminal affiche automatiquement l'adresse IP locale et **un QR Code**.
-2. **Visez le QR Code avec l'appareil photo de votre smartphone** (connecté au même réseau Wi-Fi).
-3. L'application mobile s'ouvre dans votre navigateur :
-   - Cliquez sur **"Prendre la facture en photo"** (déclenche directement la caméra de votre smartphone).
-   - Cliquez sur **"Lancer la vérification"** : le PC effectue le redressement, l'OCR et la validation.
-   - Les montants, le statut d'audit et les éventuelles anomalies s'affichent instantanément sur votre écran.
-   - Un bouton vous permet de **télécharger le classeur Excel récapitulatif directement sur votre smartphone**.
+# Créer et activer l'environnement virtuel
+python3 -m venv venv
+source venv/bin/activate  # Sur Windows : venv\Scripts\activate
+
+# Installer les dépendances
+pip install -r requirements.txt
+
+# Démarrer le serveur avec QR Code
+python server.py
+```
 
 ---
 
-## Utilisation Classique en Ligne de Commande (Batch)
-Pour tester immédiatement l'ensemble des cas d'audit (facture valide, erreur arithmétique, SIRET invalide, déformation perspective smartphone, doublon) :
+### 3. Utilisation Mobile (Scanner Smartphone)
+
+ARGUS intègre une interface pensée pour les smartphones connectés au réseau local du cabinet ou de la boutique :
+
+```
+┌────────────────────────────────────────┐
+│  SERVEUR FASTAPI ACTIF                 │
+│  URL Locale : http://192.168.1.42:8000 │
+│  Scan QR Code pour ouvrir :            │
+│  █████████████████████████████████     │
+│  █████████████████████████████████     │
+│  █████████████████████████████████     │
+└────────────────────────────────────────┘
+```
+
+1. **Connectez votre smartphone** au même réseau Wi-Fi que l'ordinateur exécutant ARGUS.
+2. **Scannez le QR Code** affiché dans votre terminal à l'aide de l'appareil photo du smartphone.
+3. L'application Web s'ouvre directement :
+   - Choisissez le mode de capture (caméra en direct ou sélection de fichiers/PDF).
+   - Déposez la facture fabricant et la facture patient dans les zones dédiées.
+   - Consultez le diagnostic instantané et téléchargez la synthèse Excel en un clic.
+
+---
+
+## Utilisation en Ligne de Commande (Batch)
+
+Pour traiter un volume important de factures sans interface graphique :
+
+### Traitement standard d'un dossier
+```bash
+python main.py --input-dir input_photos/ --output-excel factures_synthese.xlsx
+```
+
+### Options de la Ligne de Commande
+
+| Option | Description | Valeur par défaut |
+| :--- | :--- | :--- |
+| `-h`, `--help` | Affiche l'aide et la liste des arguments | — |
+| `--input-dir CHEMIN` | Répertoire source contenant les images ou PDF | `input_photos` |
+| `--db-path CHEMIN` | Emplacement du fichier de base de données SQLite | `invoices.db` |
+| `--output-excel CHEMIN` | Nom du rapport Excel généré | `factures_synthese.xlsx` |
+| `--save-debug` | Enregistre les images redressées pour contrôle visuel | `False` |
+| `--web` | Démarre le serveur web FastAPI | `False` |
+
+### Génération d'un Jeu d'Essai
+Pour valider l'ensemble des règles d'audit (facture conforme, erreur arithmétique, SIRET erroné, doublon, photo déformée) :
 ```bash
 python generate_test_samples.py
 ```
 
-### 2. Exécution du pipeline complet
-Placez vos photos de factures dans le dossier `input_photos/`, puis lancez :
-```bash
-python main.py
-```
+---
 
-### Options de la ligne de commande (CLI)
-```text
-options:
-  -h, --help            Affiche l'aide
-  --input-dir CHEMIN    Dossier source des images (défaut : input_photos)
-  --db-path CHEMIN      Chemin de la base SQLite (défaut : invoices.db)
-  --output-excel CHEMIN Chemin du rapport Excel généré (défaut : factures_synthese.xlsx)
-  --save-debug          Sauvegarde les images redressées pour inspection visuelle
-```
+## Référence de l'API REST
 
-Exemple avec paramètres personnalisés :
-```bash
-python main.py --input-dir /chemin/vers/photos --output-excel rapport_audit.xlsx --save-debug
-```
+Le backend FastAPI expose les endpoints suivants :
+
+| Méthode | Route | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Interface utilisateur Web interactive |
+| `POST` | `/api/scan` | Analyse et audit d'un ou plusieurs documents (images ou PDF) |
+| `POST` | `/api/compare` | Rapprochement bilatéral direct (Facture Fabricant ↔ Facture Client) |
+| `GET` | `/api/reconciliation` | Matrice globale de réconciliation par S/N et état des marges |
+| `GET` | `/api/invoices` | Liste exhaustive des factures auditées en base |
+| `GET` | `/api/invoices/{id}` | Détail complet d'une facture par son identifiant |
+| `PUT` | `/api/invoices/{id}` | Mise à jour manuelle des métadonnées (montants, SIRET, S/N) |
+| `DELETE` | `/api/invoices/{id}` | Suppression d'une facture spécifique |
+| `DELETE` | `/api/invoices` | Réinitialisation complète de la base de données |
+| `GET` | `/api/export` | Téléchargement du classeur Excel de synthèse |
+| `GET` | `/api/kpi` | Indicateurs clés de performance et statistiques de conformité |
 
 ---
 
-## Spécifications Fonctionnelles & Modules
+## Règles d'Audit & Algorithmes de Contrôle
 
-### 1. `core/preprocessor.py` (Vision par ordinateur)
-- **Redimensionnement à 1600 px de hauteur** pour normaliser l'échelle tout en préservant le ratio d'aspect.
-- **Détection des contours du document** : Flou gaussien, filtre de Canny, fermeture morphologique et approximation polygonale `approxPolyDP` à 4 sommets convexes.
-- **Transformation de perspective (Homographie 4 points)** : Redressement géométrique à plat de la feuille (vue orthogonale zénithale). Conserve l'image si celle-ci est déjà un document scanné plein cadre.
-- **Filtre adaptatif `cv2.adaptiveThreshold`** : Supprime les ombrages obliques causés par l'éclairage ambiant lors de la prise de vue smartphone et maximise le contraste texte/fond.
+Chaque facture ingérée est soumise à quatre vérifications indépendantes :
 
-### 2. `core/ocr_engine.py` (Moteur OCR)
-- Wrapper autour de **PaddleOCR** (`lang='fr'`, `use_angle_cls=True`).
-- Extraction du texte et des coordonnées cartésiennes des boîtes englobantes (`box: [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]`) et indices de confiance.
-- Compatible avec PaddleOCR v2.x et v3.x.
+1. **Validation Légale** :
+   - **SIRET / SIREN** : Contrôle de la clé de conformité par l'**algorithme de Luhn**.
+   - **TVA Intracommunautaire (France)** : Vérification de la clé algorithmique :
+     $$\text{Clé} = [12 + 3 \times (\text{SIREN} \pmod{97})] \pmod{97}$$
+2. **Équilibre Arithmétique** :
+   - Vérification de l'équation fiscale avec tolérance d'arrondi monétaire :
+     $$|\text{Total HT} + \text{Montant TVA} - \text{Total TTC}| \le 0{,}02\text{ €}$$
+3. **Contrôle Chronologique** :
+   - Vérification de cohérence garantissant que la date d'émission ne se situe pas dans le futur.
+4. **Détection des Doublons (Anti-Fraude)** :
+   - Calcul d'une empreinte cryptographique unique **SHA-256** combinant :
+     $$\text{Hash} = \mathcal{H}(\text{SIRET} \parallel \text{Date} \parallel \text{Numéro Facture} \parallel \text{Montant TTC})$$
 
-### 3. `core/parser.py` (Extraction & Proximité Spatiale)
-- **Regex strictes** :
-  - SIRET (14 chiffres) et SIREN (9 chiffres).
-  - Numéro de facture (`FAC-...`, `INV-...`, motifs préfixés).
-  - Date d'émission (formats `DD/MM/YYYY`, `DD-MM-YYYY`, `DD mois YYYY`).
-  - Détection et nettoyage des montants (`clean_amount`).
-- **Analyse Spatiale 2D & Recherche Floue (`thefuzz`)** :
-  - Détection des ancres textuelles ("Total TTC", "Net à payer", "Total HT", "TVA") tolérant les coquilles OCR.
-  - Recherche prioritaire de la valeur numérique située **immédiatement à droite** (sur la même ligne) ou **en dessous** (sur la même colonne).
-
-### 4. `core/validator.py` (Contrôles d'Intégrité)
-Exécute 4 contrôles indépendants :
-1. **Légal** :
-   - Vérification du SIRET/SIREN via la somme de contrôle de l'**algorithme de Luhn**.
-   - Vérification de la clé du numéro de TVA intracommunautaire français : $[12 + 3 \times (\text{SIREN} \pmod{97})] \pmod{97}$.
-2. **Arithmétique** :
-   - Vérification de l'équation fiscale : $|\text{HT} + \text{TVA} - \text{TTC}| \le 0.02\text{ €}$.
-3. **Chronologique** :
-   - Vérification que la date d'émission $\le$ date courante.
-4. **Unicité** :
-   - Calcul de l'empreinte composite **SHA-256** (`fournisseur_siret + date + num_facture + montant_ttc`) pour bloquer les doublons.
-- **Statuts retournés** : `VALIDE`, `ERREUR_CALCUL`, `SIRET_INVALIDE`, `DOUBLON`, `A_VERIFIER`.
-
-### 5. `storage/database.py` (Persistance SQLite)
-- Table `invoices` avec indexation sur `unique_hash`, `siret` et `status`.
-- Traçabilité complète des métadonnées, anomalies, hash d'intégrité et texte brut OCR.
-
-### 6. `storage/export_excel.py` (Classeur Dynamique Excel)
-- **Onglet "Détail Factures"** : Lignes formatées avec mise en forme conditionnelle :
-  - 🟢 **Vert** : `VALIDE`
-  - 🔴 **Rouge** : `ERREUR_CALCUL` ou `SIRET_INVALIDE`
-  - 🟡 **Orange** : `DOUBLON` ou `A_VERIFIER`
-- **Onglet "Tableau de Bord"** : Synthèse d'audit managériale avec calcul automatique des KPIs (volume validé, taux de conformité, répartition des anomalies).
+> [!IMPORTANT]
+> Tout document présentant une discordance se voit attribuer un statut explicite (`VALIDE`, `ERREUR_CALCUL`, `SIRET_INVALIDE`, `DOUBLON`, `A_VERIFIER`), accompagné d'un journal des anomalies consultable dans l'interface et dans le rapport Excel.
