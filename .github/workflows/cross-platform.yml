@@ -1,0 +1,107 @@
+name: Linux and Windows validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      models_url:
+        description: 'Archive HTTPS autorisée : text_detection/, text_recognition/ (optionnel textline_orientation/)'
+        required: true
+        type: string
+      models_sha256:
+        description: 'SHA-256 de cette archive, obtenu depuis une source de confiance'
+        required: true
+        type: string
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12"]
+    runs-on: ${{ matrix.os }}
+    env:
+      ARGUS_DATA_DIR: ${{ github.workspace }}/.test-data
+      PYTHONPATH: facture-checker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install test dependencies
+        run: >-
+          python -m pip install
+          fastapi==0.162.0 uvicorn==0.54.0 httpx==0.28.1
+          numpy==2.3.5 opencv-python-headless==4.10.0.84
+          pandas==3.0.1 openpyxl==3.1.5 Pillow==12.1.1
+          python-multipart==0.0.22 qrcode==8.2 pypdfium2==5.6.0
+          thefuzz==0.22.1 Levenshtein==0.27.5 typing-extensions==4.15.0 PyYAML==6.0.2
+      - name: Compile source
+        run: python -m compileall -q facture-checker
+      - name: Run tests without OCR downloads
+        run: python -m unittest discover -s facture-checker/tests -v
+      - name: Web smoke test
+        run: >-
+          python -c "from fastapi.testclient import TestClient; from web.app import app;
+          c=TestClient(app); assert c.get('/').status_code == 200;
+          assert c.get('/health').status_code == 200;
+          assert c.get('/api/diagnostics').status_code == 200"
+
+  portable-windows:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      MODELS_URL: ${{ inputs.models_url }}
+      MODELS_SHA256: ${{ inputs.models_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download verified model data into isolated directories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:MODELS_URL -notmatch '^https://' -or $env:MODELS_SHA256 -notmatch '^[a-fA-F0-9]{64}$') {
+            throw 'Une URL HTTPS et une empreinte SHA-256 valide sont obligatoires.'
+          }
+          $download = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
+          $models = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $download, $models | Out-Null
+          $archive = Join-Path $download 'models.zip'
+          Invoke-WebRequest -Uri $env:MODELS_URL -OutFile $archive
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash -ne $env:MODELS_SHA256) {
+            throw 'Empreinte des modèles incorrecte.'
+          }
+          # Le script reste dans le checkout ; seuls les fichiers de modèle attendus sont extraits.
+          python -I packaging/extract_models.py $archive $models
+          if ($LASTEXITCODE -ne 0) { throw 'Archive de modèles refusée.' }
+          "ARGUS_CI_MODELS=$models" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build with fresh Windows dependencies
+        shell: pwsh
+        run: |
+          $params = @{
+            DetectionModel = Join-Path $env:ARGUS_CI_MODELS 'text_detection'
+            RecognitionModel = Join-Path $env:ARGUS_CI_MODELS 'text_recognition'
+          }
+          if (Test-Path (Join-Path $env:ARGUS_CI_MODELS 'textline_orientation')) {
+            $params.OrientationModel = Join-Path $env:ARGUS_CI_MODELS 'textline_orientation'
+          }
+          ./packaging/build_windows.ps1 @params
+      - name: Smoke test the packaged executable with real OCR
+        shell: pwsh
+        run: |
+          python -m pip install Pillow==12.1.1
+          if ($LASTEXITCODE -ne 0) { throw 'Installation de la dépendance de recette impossible.' }
+          python -I packaging/smoke_windows.py dist/ARGUS/ARGUS.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Recette du paquet échouée.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ARGUS-Windows-candidate
+          path: dist/ARGUS

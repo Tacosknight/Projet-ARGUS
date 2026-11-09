@@ -45,7 +45,7 @@ Dans le secteur de l'audioprothèse, la gestion administrative repose sur un dou
     - Orange (Warning) : Tolérance floue sur le modèle ou TVA reconstituée.
     - Rouge (Error) : Appareil non refacturé, vente à perte ou divergence arithmétique.
 - **Lanceurs Autonomes & Interface Web Mobile-First** :
-  - Scripts 1-clic pour Linux/macOS et Windows avec configuration automatique de l'environnement virtuel et ouverture du navigateur.
+  - Lanceur Linux et package Windows autonome sans Python ni dépendance à installer sur le poste utilisateur.
   - Script Windows dédié au traitement batch avec ouverture automatique du classeur Excel.
   - Affichage d'un QR Code dans le terminal pour connexion smartphone instantanée en Wi-Fi.
   - Déclenchement de la caméra mobile pour numériser directement les factures au comptoir.
@@ -145,12 +145,14 @@ Des lanceurs automatisés permettent de démarrer l'application sans configurati
   ```
   Le script prépare l'environnement virtuel (`venv`), installe les dépendances si nécessaire, démarre le serveur FastAPI et **ouvre automatiquement votre navigateur** sur `http://localhost:8000`.
 
-- **Sous Windows** :
-  Double-cliquez sur :
-  ```cmd
-  lancer_serveur_windows.bat
-  ```
-  Le script vérifie la présence de Python (via `python` ou le launcher `py -3`), redirige automatiquement vers le site officiel en cas d'absence, initialise le `venv`, met à jour `pip`, ouvre l'interface dans votre navigateur par défaut et affiche le QR Code dans la console.
+- **Sous Windows — package portable livré au client** :
+  1. Téléchargez le ZIP de livraison et **extrayez-le entièrement** dans un dossier accessible, par exemple `Documents\ARGUS`.
+  2. Conservez toute l'arborescence extraite : `ARGUS.exe`, `_internal` et `models` sont tous nécessaires. Ne lancez pas l'EXE directement depuis le ZIP et ne copiez pas l'EXE seul.
+  3. Double-cliquez sur `ARGUS.exe` (ou sur `lancer_serveur_windows.bat`).
+
+  Aucun téléchargement, droit administrateur, Python, pip ou PowerShell n'est requis au lancement côté client. Le script PowerShell de `packaging/` sert uniquement à construire la livraison sur un poste de release Windows. Le lanceur `.bat` utilise `cmd.exe` et démarre simplement `ARGUS.exe`; l'interface locale s'ouvre sans exposer de port sur le réseau.
+
+  Pour conserver le scanner smartphone, utilisez `lancer_scanner_mobile_windows.bat`. Ce mode réseau optionnel peut nécessiter une autorisation pare-feu de l'entreprise.
 
 #### Traitement par Lot 1-Clic (Windows)
 
@@ -159,7 +161,7 @@ Pour auditer d'un coup l'ensemble des documents placés dans le dossier `input_p
   ```cmd
   traiter_dossier_batch.bat
   ```
-  Ce script exécute l'analyse complète (contrôles légaux, extraction S/N, rapprochement), génère `factures_synthese.xlsx` et **ouvre immédiatement le fichier dans Microsoft Excel ou votre tableur par défaut**.
+  Ce raccourci ouvre désormais ARGUS : importez plusieurs fichiers depuis le site, puis téléchargez le classeur Excel. Cette méthode évite toute dépendance Python sur le poste.
 
 > [!TIP]
 > Sur Linux ou macOS, l'équivalent en une ligne de commande s'exécute via :

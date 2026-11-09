@@ -6,8 +6,11 @@ dans le terminal pour permettre une connexion instantanée depuis un smartphone.
 """
 
 from pathlib import Path
+import argparse
 import socket
 import sys
+import threading
+import webbrowser
 import uvicorn
 import qrcode
 
@@ -52,18 +55,35 @@ def print_startup_banner(ip: str, port: int) -> None:
     print("\nAppuyez sur Ctrl+C pour arrêter le serveur.\n")
 
 
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Serveur local ARGUS")
+    parser.add_argument("--mobile", action="store_true", help="Autoriser le scanner smartphone sur le réseau local.")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--no-browser", action="store_true")
+    return parser.parse_args()
+
+
 def main() -> None:
-    port = 8000
-    ip = get_local_ip()
-    print_startup_banner(ip, port)
+    args = parse_arguments()
+    import os
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    port = args.port
+    ip = get_local_ip() if args.mobile else "127.0.0.1"
+    if args.mobile:
+        print_startup_banner(ip, port)
+    else:
+        print(f"\nARGUS est disponible sur http://127.0.0.1:{port}")
+        print("Mode local sécurisé actif. Utilisez --mobile pour le scanner smartphone.\n")
+    if not args.no_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
 
     # Lancement du serveur uvicorn
     uvicorn.run(
         "web.app:app",
-        host="0.0.0.0",
+        host="0.0.0.0" if args.mobile else "127.0.0.1",
         port=port,
         log_level="info",
-        reload=True,
+        reload=False,
     )
 
 

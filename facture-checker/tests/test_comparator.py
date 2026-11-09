@@ -36,10 +36,10 @@ class TestComparator(unittest.TestCase):
         v_sn = ["2622X1GMK", "2623X1XYJ"]
         c_sn = ["2622X1GMK"]
         status, matches, summary = compare_serial_numbers(v_sn, c_sn)
-        self.assertEqual(status, STATUS_ERROR)
-        error_items = [m for m in matches if m["status"] == STATUS_ERROR]
-        self.assertEqual(len(error_items), 1)
-        self.assertEqual(error_items[0]["vendor_sn"], "2623X1XYJ")
+        self.assertEqual(status, STATUS_WARNING)
+        waiting_items = [m for m in matches if m["status"] == STATUS_WARNING]
+        self.assertEqual(len(waiting_items), 1)
+        self.assertEqual(waiting_items[0]["vendor_sn"], "2623X1XYJ")
 
     def test_compare_invoices_complete_flow(self):
         vendor = {

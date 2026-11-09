@@ -10,9 +10,18 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import os
+import platform
+import sys
+import sqlite3
+import zipfile
+import tempfile
+from functools import wraps
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 import re
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import cv2
@@ -31,8 +40,19 @@ from core.validator import InvoiceValidator
 from core.reconciliation import reconcile_invoices
 from core.comparator import compare_invoices
 from core.multipage import consolidate_pages, are_pages_of_same_invoice
+from core.app_paths import (
+    DATABASE_PATH,
+    EXCEL_PATH,
+    INPUT_DIR,
+    MODELS_DIR,
+    DATA_DIR,
+    ensure_app_directories,
+)
+from core.document_loader import iter_document_pages
 from storage.database import InvoiceDatabase
 from storage.export_excel import export_to_excel
+from storage.backup import apply_restore, extract_backup, snapshot_sqlite, RecoveryError
+from core.data_lock import DATA_LOCK
 
 logger = logging.getLogger("FactureChecker.Web")
 
@@ -44,23 +64,15 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["http://127.0.0.1:8000", "http://localhost:8000"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Détection intelligente du chemin de la BDD et de l'export Excel (répertoire courant ou BASE_DIR)
-CWD_DB = Path.cwd() / "invoices.db"
-DB_PATH = CWD_DB if CWD_DB.exists() else (BASE_DIR / "invoices.db")
-
-CWD_EXCEL = Path.cwd() / "factures_synthese.xlsx"
-EXCEL_PATH = CWD_EXCEL if CWD_EXCEL.exists() else (BASE_DIR / "factures_synthese.xlsx")
-
-INPUT_DIR = Path.cwd() / "input_photos" if (Path.cwd() / "input_photos").exists() else (BASE_DIR / "input_photos")
-INPUT_DIR.mkdir(parents=True, exist_ok=True)
+ensure_app_directories()
+DB_PATH = DATABASE_PATH
 
 # Instances partagées
 db = InvoiceDatabase(str(DB_PATH))
@@ -69,12 +81,36 @@ ocr_engine = OCREngine(lang="fr")
 
 
 
+def serialized_data(function):
+    """Routes sans await interne : protéger aussi les fichiers et les snapshots."""
+    @wraps(function)
+    async def locked(*args, **kwargs):
+        with DATA_LOCK:
+            return await function(*args, **kwargs)
+    return locked
+
+
+def refresh_excel(invoices: List[Dict[str, Any]]) -> List[str]:
+    try:
+        export_to_excel(invoices, output_path=EXCEL_PATH)
+        return []
+    except Exception:
+        # La transaction métier est déjà validée : ne pas inviter à la répéter.
+        logger.warning("Export Excel différé (%s).", sys.exc_info()[0].__name__)
+        return ["Données enregistrées ; export Excel non actualisé. Fermez Excel puis relancez l'export."]
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_mobile_ui() -> HTMLResponse:
     index_file = Path(__file__).parent / "templates" / "index.html"
     if index_file.exists():
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
     return HTMLResponse("<h1>Facture-Checker Web UI</h1>")
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    return JSONResponse(content={"status": "ok", "version": app.version})
 
 
 def process_uploaded_invoice_files(
@@ -100,78 +136,48 @@ def process_uploaded_invoice_files(
     for idx, ufile in enumerate(uploaded_files, 1):
         if not ufile.filename:
             continue
-        safe_filename = f"{prefix}_{timestamp_str}_p{idx}_{Path(ufile.filename).name}"
+        original_name = Path(ufile.filename).name
+        safe_name = re.sub(r"[^\w.()' -]+", "_", original_name, flags=re.UNICODE).strip(" .")
+        safe_filename = f"{prefix}_{timestamp_str}_p{idx}_{safe_name or 'document'}"
         saved_path = INPUT_DIR / safe_filename
 
         with saved_path.open("wb") as buffer:
             shutil.copyfileobj(ufile.file, buffer)
 
-        # Support des documents PDF (multi-pages inclus)
-        if saved_path.suffix.lower() == ".pdf":
-            try:
-                import pypdfium2 as pdfium
-                pdf_doc = pdfium.PdfDocument(str(saved_path))
-                total_pdf_pages = len(pdf_doc)
-                for page_idx in range(total_pdf_pages):
-                    page = pdf_doc[page_idx]
-                    pil_img = page.render(scale=2).to_pil()
-                    bgr_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
-                    pdf_page_filename = f"{prefix}_{timestamp_str}_f{idx}_p{page_idx + 1}.jpg"
-                    pdf_page_path = INPUT_DIR / pdf_page_filename
-                    cv2.imwrite(str(pdf_page_path), bgr_img)
-
-                    # 1. Vision et pré-traitement
-                    preprocessed = preprocess_image(bgr_img, target_height=2400, apply_threshold=False)
-
-                    # 2. OCR PaddleOCR
-                    ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
-                    if not ocr_results:
-                        parsed_pages.append({
-                            "filename": pdf_page_filename,
-                            "invoice_type": invoice_type or "FOURNISSEUR",
-                            "status": "A_VERIFIER",
-                            "error_details": ["Aucun texte lisible détecté sur cette page."],
-                            "serial_numbers": [],
-                            "page_current": page_idx + 1,
-                            "page_total": total_pdf_pages,
-                            "created_at": datetime.now().isoformat(),
-                        })
-                        continue
-
-                    # 3. Parsing de la page
-                    p_data = parse_invoice(ocr_results, forced_type=invoice_type)
-                    p_data["filename"] = pdf_page_filename
-                    p_data["page_current"] = page_idx + 1
-                    p_data["page_total"] = total_pdf_pages
-                    parsed_pages.append(p_data)
-            except Exception as e_pdf:
-                logger.error("Erreur lors de la lecture du fichier PDF %s : %s", saved_path, e_pdf)
-                raise HTTPException(status_code=400, detail=f"Erreur de lecture du PDF : {e_pdf}")
-            continue
-
-        # 1. Vision et pré-traitement (Images JPG / PNG / WEBP)
-        preprocessed = preprocess_image(saved_path, target_height=2400, apply_threshold=False)
-
-        # 2. OCR PaddleOCR
-        ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
-        if not ocr_results:
-            parsed_pages.append({
-                "filename": safe_filename,
-                "invoice_type": invoice_type or "FOURNISSEUR",
-                "status": "A_VERIFIER",
-                "error_details": ["Aucun texte lisible détecté sur cette page."],
-                "serial_numbers": [],
-                "page_current": idx,
-                "page_total": len(uploaded_files),
-                "created_at": datetime.now().isoformat(),
-            })
-            continue
-
-        # 3. Parsing de la page
-        p_data = parse_invoice(ocr_results, forced_type=invoice_type)
-        p_data["filename"] = safe_filename
-        parsed_pages.append(p_data)
+        try:
+            pages = iter_document_pages(saved_path)
+            for page_number, page_total, bgr_img in pages:
+                page_filename = safe_filename
+                if saved_path.suffix.lower() == ".pdf":
+                    page_filename = f"{prefix}_{timestamp_str}_f{idx}_p{page_number}.jpg"
+                    encoded_ok, encoded = cv2.imencode(".jpg", bgr_img)
+                    if not encoded_ok:
+                        raise OSError("Impossible d'encoder la page PDF en image.")
+                    (INPUT_DIR / page_filename).write_bytes(encoded.tobytes())
+                preprocessed = preprocess_image(bgr_img, target_height=2400, apply_threshold=False)
+                ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
+                if not ocr_results:
+                    parsed_pages.append({
+                        "filename": page_filename,
+                        "invoice_type": invoice_type or "FOURNISSEUR",
+                        "status": "A_VERIFIER",
+                        "error_details": ["Aucun texte lisible détecté sur cette page."],
+                        "serial_numbers": [],
+                        "page_current": page_number,
+                        "page_total": page_total,
+                        "created_at": datetime.now().isoformat(),
+                    })
+                    continue
+                p_data = parse_invoice(ocr_results, forced_type=invoice_type)
+                p_data["filename"] = page_filename
+                p_data["page_current"] = page_number
+                p_data["page_total"] = page_total
+                parsed_pages.append(p_data)
+        except RuntimeError as document_error:
+            raise HTTPException(status_code=503, detail=str(document_error)) from document_error
+        except Exception as document_error:
+            logger.warning("Document non traité (%s).", type(document_error).__name__)
+            raise HTTPException(status_code=400, detail=f"Document illisible : {document_error}") from document_error
 
     if not parsed_pages:
         raise HTTPException(status_code=400, detail="Échec de lecture des fichiers.")
@@ -196,7 +202,7 @@ def process_uploaded_invoice_files(
     # 5. Validation d'intégrité
     status, errors, unique_hash = validator.validate(record)
     record["status"] = status
-    record["error_details"] = errors
+    record["error_details"] = list(dict.fromkeys(record.get("error_details", []) + errors))
     record["unique_hash"] = unique_hash
 
     # 6. Sauvegarde SQLite (nettoyage de l'ancienne version partielle si consolidée)
@@ -211,6 +217,7 @@ def process_uploaded_invoice_files(
 
 
 @app.post("/api/scan")
+@serialized_data
 async def scan_invoice(
     file: Optional[UploadFile] = File(None),
     files: Optional[List[UploadFile]] = File(None),
@@ -238,7 +245,7 @@ async def scan_invoice(
 
         # Mise à jour de l'Excel avec onglet de réconciliation
         all_invoices = db.get_all_invoices()
-        export_to_excel(all_invoices, output_path=EXCEL_PATH)
+        warnings = refresh_excel(all_invoices)
 
         # Diagnostic de rapprochement immédiat
         reconcil = reconcile_invoices(all_invoices)
@@ -257,10 +264,13 @@ async def scan_invoice(
                 })
 
         record["reconciliation"] = reconciliation_feedback
+        record["warnings"] = warnings
         return JSONResponse(content=record)
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.exception("Erreur lors de l'analyse mobile : %s", exc)
+        logger.error("Échec analyse mobile (%s).", type(exc).__name__)
         return JSONResponse(
             status_code=500,
             content={
@@ -271,6 +281,7 @@ async def scan_invoice(
 
 
 @app.post("/api/compare")
+@serialized_data
 async def compare_invoices_endpoint(
     vendor_file: Optional[UploadFile] = File(None),
     vendor_files: Optional[List[UploadFile]] = File(None),
@@ -325,14 +336,17 @@ async def compare_invoices_endpoint(
 
         # 3. Mise à jour automatique de la synthèse Excel
         all_invoices = db.get_all_invoices()
-        export_to_excel(all_invoices, output_path=EXCEL_PATH)
+        warnings = refresh_excel(all_invoices)
 
         # 4. Comparaison directe des deux documents
         comparison_result = compare_invoices(vendor_record, client_record)
+        comparison_result["warnings"] = warnings
         return JSONResponse(content=comparison_result)
 
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.exception("Erreur lors de la comparaison des factures : %s", exc)
+        logger.error("Échec comparaison (%s).", type(exc).__name__)
         return JSONResponse(
             status_code=500,
             content={
@@ -369,6 +383,7 @@ async def get_single_invoice(invoice_id: int) -> JSONResponse:
 
 
 @app.put("/api/invoices/{invoice_id}")
+@serialized_data
 async def update_single_invoice(
     invoice_id: int,
     updates: Dict[str, Any] = Body(...),
@@ -413,6 +428,23 @@ async def update_single_invoice(
         elif isinstance(val_pn, list):
             updates["product_names"] = [str(p).strip() for p in val_pn if str(p).strip()]
 
+    if "document_type" in updates:
+        updates["document_type"] = str(updates["document_type"] or "FACTURE").upper()
+        if updates["document_type"] not in {"FACTURE", "AVOIR"}:
+            raise HTTPException(status_code=400, detail="Type de document invalide.")
+    if "related_invoice_id" in updates:
+        related = updates["related_invoice_id"]
+        if related in (None, "", 0, "0"):
+            updates["related_invoice_id"] = None
+        else:
+            try:
+                related_id = int(related)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Facture d'origine invalide.") from exc
+            if related_id == invoice_id or not db.get_invoice_by_id(related_id):
+                raise HTTPException(status_code=400, detail="Facture d'origine introuvable.")
+            updates["related_invoice_id"] = related_id
+
     # Re-calcul TVA automatique si HT et TTC fournis sans TVA
     if "montant_ht" in updates and "montant_ttc" in updates and "montant_tva" not in updates:
         try:
@@ -428,7 +460,7 @@ async def update_single_invoice(
 
     # Synchronisation immédiate avec le classeur Excel
     all_invoices = db.get_all_invoices()
-    export_to_excel(all_invoices, output_path=EXCEL_PATH)
+    warnings = refresh_excel(all_invoices)
 
     updated_inv = db.get_invoice_by_id(invoice_id)
     return JSONResponse(
@@ -436,11 +468,13 @@ async def update_single_invoice(
             "status": "OK",
             "message": f"Facture #{invoice_id} mise à jour avec succès.",
             "invoice": updated_inv,
+            "warnings": warnings,
         }
     )
 
 
 @app.delete("/api/invoices/{invoice_id}")
+@serialized_data
 async def delete_single_invoice(invoice_id: int) -> JSONResponse:
     """Supprime une facture individuelle par son ID et actualise la synthèse Excel."""
     inv = db.get_invoice_by_id(invoice_id)
@@ -465,18 +499,20 @@ async def delete_single_invoice(invoice_id: int) -> JSONResponse:
 
     # Mise à jour du classeur Excel
     all_invoices = db.get_all_invoices()
-    export_to_excel(all_invoices, output_path=EXCEL_PATH)
+    warnings = refresh_excel(all_invoices)
 
     return JSONResponse(
         content={
             "status": "OK",
             "message": f"Facture #{invoice_id} supprimée avec succès.",
             "remaining_count": len(all_invoices),
+            "warnings": warnings,
         }
     )
 
 
 @app.delete("/api/invoices")
+@serialized_data
 async def delete_all_invoices() -> JSONResponse:
     """Supprime toutes les factures enregistrées et réinitialise l'Excel."""
     all_invoices = db.get_all_invoices()
@@ -493,29 +529,42 @@ async def delete_all_invoices() -> JSONResponse:
                     pass
 
     deleted_count = db.clear_all_invoices()
-    export_to_excel([], output_path=EXCEL_PATH)
+    warnings = refresh_excel([])
 
     return JSONResponse(
         content={
             "status": "OK",
             "message": f"Toutes les factures ({deleted_count}) ont été supprimées.",
             "deleted_count": deleted_count,
+            "warnings": warnings,
         }
     )
 
 
 @app.get("/api/export")
+@serialized_data
 async def download_excel() -> FileResponse:
     all_invoices = db.get_all_invoices()
-    export_to_excel(all_invoices, output_path=EXCEL_PATH)
+    if refresh_excel(all_invoices):
+        raise HTTPException(status_code=503, detail="Export impossible. Fermez Excel puis réessayez.")
 
     if not EXCEL_PATH.exists():
         raise HTTPException(status_code=404, detail="Classeur Excel introuvable.")
 
+    # Un instantané unique évite qu'un export suivant remplace le fichier pendant
+    # son envoi ; le handle de téléchargement n'empêche pas la restauration.
+    with tempfile.NamedTemporaryFile(dir=EXCEL_PATH.parent, suffix=".xlsx", delete=False) as handle:
+        download = Path(handle.name)
+    try:
+        shutil.copy2(EXCEL_PATH, download)
+    except OSError:
+        download.unlink(missing_ok=True)
+        raise
     return FileResponse(
-        path=str(EXCEL_PATH),
+        path=str(download),
         filename="factures_synthese.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        background=BackgroundTask(download.unlink, missing_ok=True),
     )
 
 
@@ -533,3 +582,111 @@ async def get_kpis() -> JSONResponse:
             "reconciliation": reconcil["kpi"],
         }
     )
+
+
+@app.get("/api/diagnostics")
+async def get_diagnostics() -> JSONResponse:
+    """Autodiagnostic local, sans inclure de données de facture ou de patient."""
+    checks: List[Dict[str, Any]] = []
+
+    def add_check(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": bool(ok), "detail": detail})
+
+    try:
+        ensure_app_directories()
+        probe = DATA_DIR / ".write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        add_check("Dossier de données", True, str(DATA_DIR))
+    except Exception as exc:
+        add_check("Dossier de données", False, str(exc))
+
+    try:
+        db.get_connection().close()
+        add_check("Base SQLite", True, str(DB_PATH))
+    except Exception as exc:
+        add_check("Base SQLite", False, str(exc))
+
+    try:
+        import pypdfium2  # noqa: F401
+        add_check("Lecture PDF", True, "pypdfium2 disponible")
+    except Exception as exc:
+        add_check("Lecture PDF", False, str(exc))
+
+    from core.ocr_models import validate_ocr_models
+    validation = validate_ocr_models(MODELS_DIR)
+    add_check(
+        "Modèles OCR hors ligne",
+        validation.is_valid,
+        (f"Fichiers et noms vérifiés dans {MODELS_DIR} ; chargement réel non vérifié"
+         if validation.is_valid else validation.error_message()),
+    )
+
+    disk = shutil.disk_usage(DATA_DIR)
+    add_check("Espace disque", disk.free >= 500 * 1024 * 1024, f"{disk.free // (1024 * 1024)} Mo libres")
+    return JSONResponse(content={
+        "status": "OK" if all(item["ok"] for item in checks) else "ATTENTION",
+        "version": app.version,
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "checks": checks,
+    })
+
+
+@app.get("/api/backup")
+@serialized_data
+async def download_backup() -> FileResponse:
+    """Crée une sauvegarde locale complète à conserver dans un emplacement sûr."""
+    ensure_app_directories()
+    backup_path = EXCEL_PATH.parent / f"ARGUS_sauvegarde_{datetime.now():%Y%m%d_%H%M%S}_{uuid4().hex[:8]}.zip"
+    with tempfile.TemporaryDirectory(dir=DATA_DIR, prefix=".backup-") as temporary:
+        snapshot = Path(temporary)
+        with zipfile.ZipFile(backup_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path, archive_name in (
+                (DB_PATH, "data/invoices.db"),
+                (DATA_DIR / "data" / "ocr_cache.db", "data/ocr_cache.db"),
+            ):
+                if path.is_file():
+                    destination = snapshot / path.name
+                    snapshot_sqlite(path, destination)
+                    archive.write(destination, archive_name)
+            if EXCEL_PATH.is_file():
+                archive.write(EXCEL_PATH, "exports/factures_synthese.xlsx")
+            for document in INPUT_DIR.rglob("*"):
+                if document.is_file():
+                    archive.write(document, f"imports/{document.relative_to(INPUT_DIR).as_posix()}")
+    return FileResponse(backup_path, filename=backup_path.name, media_type="application/zip")
+
+
+@app.post("/api/restore")
+@serialized_data
+async def restore_backup(file: UploadFile = File(...)) -> JSONResponse:
+    """Restaure une archive produite par ARGUS après contrôles de sécurité."""
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Sélectionnez une sauvegarde ARGUS au format ZIP.")
+    restore_dir = Path(tempfile.mkdtemp(dir=DATA_DIR, prefix=".restore-"))
+    keep_recovery = False
+    try:
+        archive_path = restore_dir / "backup.zip"
+        with archive_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        content = restore_dir / "content"
+        candidate = extract_backup(archive_path, content)
+        # Migrer/valider le schéma avant de remplacer les fichiers actifs.
+        prepared_db = InvoiceDatabase(str(candidate))
+        prepared_db.get_all_invoices()
+        # Les accès DB/cache sont fermés explicitement et protégés par DATA_LOCK.
+        apply_restore(content, Path(DB_PATH), DATA_DIR / "data" / "ocr_cache.db",
+                      INPUT_DIR, restore_dir / "recovery")
+    except RecoveryError as exc:
+        keep_recovery = True
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except (ValueError, zipfile.BadZipFile, sqlite3.DatabaseError) as exc:
+        raise HTTPException(status_code=400, detail=f"Sauvegarde invalide : {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="Restauration interrompue ; données précédentes conservées. Vérifiez les droits d'accès et réessayez.") from exc
+    finally:
+        if not keep_recovery:
+            shutil.rmtree(restore_dir, ignore_errors=True)
+    warnings = refresh_excel(db.get_all_invoices())
+    return JSONResponse(content={"status": "OK", "message": "Sauvegarde restaurée avec succès.", "warnings": warnings})

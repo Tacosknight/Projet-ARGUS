@@ -11,6 +11,20 @@ import logging
 import cv2
 import numpy as np
 
+from core.ocr_models import validate_ocr_models
+
+
+class OCRInferenceError(RuntimeError):
+    """Erreur technique pendant le chargement ou l'inférence OCR.
+
+    Cette erreur distingue une panne du moteur d'un résultat légitime sans texte
+    (qui reste représenté par ``[]``).
+    """
+
+
+class OCRModelError(OCRInferenceError):
+    """Les modèles locaux sont absents, incohérents ou non chargeables."""
+
 # Configuration du logger
 logger = logging.getLogger("FactureChecker.OCR")
 
@@ -56,15 +70,57 @@ class OCREngine:
                 self.lang,
                 self.use_angle_cls,
             )
-            # Gestion de la compatibilité des arguments selon la version de PaddleOCR
+            # En distribution Windows, les modèles sont embarqués pour garantir
+            # un premier lancement hors ligne. En développement, les modèles
+            # PaddleOCR configurés par l'environnement restent utilisables.
+            from core.app_paths import MODELS_DIR, is_frozen
+
+            local_validation = validate_ocr_models(MODELS_DIR)
+            local_kwargs: Dict[str, Any] = {
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "use_textline_orientation": self.use_angle_cls and local_validation.orientation is not None,
+            }
+            if local_validation.detection.files_present and local_validation.recognition.files_present:
+                local_kwargs.update(
+                    {
+                        "text_detection_model_name": local_validation.detection.model_name,
+                        "text_detection_model_dir": str(local_validation.detection.path),
+                        "text_recognition_model_name": local_validation.recognition.model_name,
+                        "text_recognition_model_dir": str(local_validation.recognition.path),
+                    }
+                )
+            if local_validation.orientation is not None and local_validation.orientation.files_present:
+                local_kwargs.update(
+                    {
+                        "textline_orientation_model_name": local_validation.orientation.model_name,
+                        "textline_orientation_model_dir": str(local_validation.orientation.path),
+                    }
+                )
+            if is_frozen() and not local_validation.is_valid:
+                raise OCRModelError(
+                    "Les modèles OCR locaux sont absents ou incohérents "
+                    f"({MODELS_DIR}) : {local_validation.error_message()}"
+                )
+
+            # La distribution utilise PaddleOCR v3 et ne doit jamais retomber
+            # sur des modèles téléchargés implicitement.
             try:
-                # PaddleOCR v3 / PaddleX
-                self._ocr = PaddleOCR(lang=self.lang)
-            except Exception:
+                self._ocr = PaddleOCR(lang=self.lang, **local_kwargs)
+            except Exception as exc:
+                if is_frozen():
+                    raise OCRModelError(
+                        f"Impossible de charger les modèles OCR locaux ({MODELS_DIR}). "
+                        "Vérifiez l'intégrité du package ARGUS."
+                    ) from exc
                 try:
-                    self._ocr = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=self.lang)
+                    legacy_kwargs = {
+                        "det_model_dir": str(local_validation.detection.path),
+                        "rec_model_dir": str(local_validation.recognition.path),
+                    } if local_validation.detection.files_present and local_validation.recognition.files_present else {}
+                    self._ocr = PaddleOCR(use_angle_cls=self.use_angle_cls, lang=self.lang, **legacy_kwargs)
                 except Exception:
-                    self._ocr = PaddleOCR()
+                    raise
 
         return self._ocr
 
@@ -121,12 +177,12 @@ class OCREngine:
                 raw_results = ocr_instance.predict(img)
             else:
                 raw_results = ocr_instance.ocr(img)
-        except Exception as e:
+        except Exception as exc:
             try:
                 raw_results = ocr_instance.ocr(img)
-            except Exception as e2:
-                logger.error("Erreur durant l'exécution de PaddleOCR : %s", e2)
-                return []
+            except Exception as exc2:
+                logger.error("Échec de l'inférence PaddleOCR (%s).", type(exc2).__name__)
+                raise OCRInferenceError("L'inférence OCR a échoué.") from exc2
 
         # Gestion des résultats vides
         if not raw_results:

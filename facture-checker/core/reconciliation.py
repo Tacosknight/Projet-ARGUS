@@ -1,290 +1,218 @@
-"""
-Module de rapprochement (réconciliation) et corrélation Factures Fournisseurs <-> Factures Clients.
-Utilise les Numéros de Série uniques (S/N) des prothèses auditives pour lier
-les dépenses d'achat fabricants et les refacturations aux patients.
+"""Matrice de rapprochement documentaire Achats ↔ Clients.
+
+Une facture fournisseur peut être groupée : l'absence d'une vente dans les
+documents importés est donc un état d'attente, jamais une perte présumée.
 """
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+import json
 import logging
+import re
+import unicodedata
+from typing import Any, Dict, List, Optional, Tuple
+
+from thefuzz import fuzz
 
 logger = logging.getLogger("FactureChecker.Reconciliation")
 
+STATUS_EXACT = "RAPPROCHE"
+STATUS_PROBABLE = "RAPPROCHE_PROBABLE"
+STATUS_PENDING = "ACHAT_EN_ATTENTE"
+STATUS_REVIEW = "A_VERIFIER"
+STATUS_CREDIT = "AVOIR_RATTACHE"
+
 
 def find_fuzzy_match(sn_target: str, pool: Any) -> Optional[str]:
-    """Recherche un numéro de série exact ou tolérant au bruit OCR (préfixe >= 7 car ou 1 faute d'OCR)."""
+    """Recherche exacte ou tolérante à une seule erreur OCR sur un S/N."""
     keys = list(pool.keys()) if hasattr(pool, "keys") else list(pool)
     if sn_target in keys:
         return sn_target
-    for cand in keys:
-        if (sn_target in cand or cand in sn_target) and min(len(sn_target), len(cand)) >= 7:
-            return cand
-        if len(sn_target) == len(cand) and sum(1 for a, b in zip(sn_target, cand) if a != b) <= 1:
-            return cand
+    for candidate in keys:
+        if (sn_target in candidate or candidate in sn_target) and min(len(sn_target), len(candidate)) >= 7:
+            return candidate
+        if len(sn_target) == len(candidate) and sum(a != b for a, b in zip(sn_target, candidate)) <= 1:
+            return candidate
     return None
 
 
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, list) else []
+        except Exception:
+            return [value] if value else []
+    return []
+
+
+def _product_match(left: str, right: str) -> bool:
+    left_norm, right_norm = _normalize_product(left or ""), _normalize_product(right or "")
+    return bool(left_norm and right_norm and (
+        left_norm == right_norm or left_norm in right_norm or right_norm in left_norm or fuzz.ratio(left_norm, right_norm) >= 75
+    ))
+
+
+def _normalize_product(name: str) -> str:
+    value = unicodedata.normalize("NFKD", name).encode("ASCII", "ignore").decode("utf-8").lower()
+    for brand in ("phonak", "widex", "signia", "oticon", "starkey", "resound", "bernafon", "philips", "sonova", "unitron", "demant"):
+        value = re.sub(rf"^{brand}\s+", "", value)
+    return re.sub(r"[ \t\-_./&*,+]+", "", value)
+
+
+def _entries(invoice: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalise les lignes disponibles sans inventer de prix unitaire."""
+    items = _as_list(invoice.get("product_items"))
+    serials = [str(value).strip().upper() for value in _as_list(invoice.get("serial_numbers")) if str(value).strip()]
+    result: List[Dict[str, Any]] = []
+    used_serials = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        serial = str(item.get("serial_number") or "").strip().upper() or None
+        if serial:
+            used_serials.add(serial)
+        name = item.get("product_name") or item.get("designation") or ""
+        result.append({
+            "invoice": invoice,
+            "serial_number": serial,
+            "product_name": str(name).strip(),
+            "quantity": float(item.get("quantity") or 1),
+            "unit_ht": item.get("unit_ht"),
+            "unit_ttc": item.get("unit_ttc"),
+            "source": "ligne OCR" if name else "S/N OCR",
+        })
+    for serial in serials:
+        if serial not in used_serials:
+            result.append({"invoice": invoice, "serial_number": serial, "product_name": "", "quantity": 1.0, "unit_ht": None, "unit_ttc": None, "source": "S/N OCR"})
+    if not result:
+        for name in _as_list(invoice.get("product_names")):
+            if name:
+                result.append({"invoice": invoice, "serial_number": None, "product_name": str(name), "quantity": 1.0, "unit_ht": None, "unit_ttc": None, "source": "modèle OCR"})
+    return result
+
+
+def _invoice_data(invoice: Optional[Dict[str, Any]], prefix: str) -> Dict[str, Any]:
+    if not invoice:
+        return {f"{prefix}_{field}": None for field in ("invoice_id", "num_facture", "date", "fichier", "tiers")}
+    return {
+        f"{prefix}_invoice_id": invoice.get("id"),
+        f"{prefix}_num_facture": invoice.get("numero_facture"),
+        f"{prefix}_date": invoice.get("date_facture"),
+        f"{prefix}_fichier": invoice.get("filename"),
+        f"{prefix}_tiers": invoice.get("fournisseur_nom") if prefix == "achat" else invoice.get("patient_nom"),
+    }
+
+
 class ReconciliationEngine:
-
-    """
-    Moteur déterministe de rapprochement des factures d'achat et de vente
-    par numéro de série unique (S/N).
-    """
-
-    STATUS_RAPPROCHE = "RAPPROCHE"
-    STATUS_NON_REFACTURE = "NON_REFACTURE"
-    STATUS_ACHAT_MANQUANT = "ACHAT_NON_TROUVE"
-
     def __init__(self, invoices: List[Dict[str, Any]]) -> None:
         self.invoices = invoices
-        self.vendor_invoices = [
-            inv for inv in invoices if (inv.get("invoice_type") or "").upper() == "FOURNISSEUR"
-        ]
-        self.client_invoices = [
-            inv for inv in invoices if (inv.get("invoice_type") or "").upper() == "CLIENT"
-        ]
+        self.purchases = [invoice for invoice in invoices if (invoice.get("invoice_type") or "").upper() == "FOURNISSEUR" and (invoice.get("document_type") or "FACTURE").upper() != "AVOIR"]
+        self.sales = [invoice for invoice in invoices if (invoice.get("invoice_type") or "").upper() == "CLIENT" and (invoice.get("document_type") or "FACTURE").upper() != "AVOIR"]
+        self.credits = [invoice for invoice in invoices if (invoice.get("document_type") or "FACTURE").upper() == "AVOIR"]
+
+    def _credits_for(self, invoice: Dict[str, Any]) -> List[Dict[str, Any]]:
+        return [credit for credit in self.credits if credit.get("related_invoice_id") == invoice.get("id")]
+
+    def _make_item(self, status: str, diagnostic: str, purchase: Optional[Dict[str, Any]], sale: Optional[Dict[str, Any]], method: str, credits: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        purchase_invoice = purchase.get("invoice") if purchase else None
+        sale_invoice = sale.get("invoice") if sale else None
+        price_comparable = bool(purchase and sale and purchase.get("unit_ttc") is not None and sale.get("unit_ttc") is not None)
+        purchase_price = purchase.get("unit_ttc") if purchase else None
+        sale_price = sale.get("unit_ttc") if sale else None
+        difference = round(float(sale_price) - float(purchase_price), 2) if price_comparable else None
+        credit_numbers = [credit.get("numero_facture") or f"Avoir #{credit.get('id')}" for credit in credits or []]
+        if credit_numbers:
+            diagnostic += f" · Avoir rattaché : {', '.join(credit_numbers)}"
+        result = {
+            "status": status,
+            "match_method": method,
+            "diagnostic": diagnostic,
+            "serial_number": (purchase or sale or {}).get("serial_number") or "—",
+            "produit_achat": purchase.get("product_name", "") if purchase else "",
+            "produit_vente": sale.get("product_name", "") if sale else "",
+            "produit_nom": (purchase or sale or {}).get("product_name") or "Non identifié",
+            "quantite_achat": purchase.get("quantity") if purchase else None,
+            "quantite_vente": sale.get("quantity") if sale else None,
+            "achat_prix_ht": purchase.get("unit_ht") if purchase else None,
+            "achat_prix_ttc": purchase_price,
+            "vente_prix_ht": sale.get("unit_ht") if sale else None,
+            "vente_prix_ttc": sale_price,
+            "prix_comparable": price_comparable,
+            "ecart_ttc": difference,
+            "avoirs": credit_numbers,
+            "quantity_match": bool(purchase and sale and purchase.get("quantity") == sale.get("quantity")),
+        }
+        result.update(_invoice_data(purchase_invoice, "achat"))
+        result.update(_invoice_data(sale_invoice, "vente"))
+        # Compatibilité des consommateurs existants.
+        result["fournisseur_nom"] = result.get("achat_tiers") or "—"
+        result["patient_nom"] = result.get("vente_tiers") or "—"
+        result["achat_num_facture"] = result.get("achat_num_facture") or "—"
+        result["vente_num_facture"] = result.get("vente_num_facture") or "—"
+        result["achat_date"] = result.get("achat_date") or "—"
+        result["vente_date"] = result.get("vente_date") or "—"
+        result["achat_fichier"] = result.get("achat_fichier")
+        result["vente_fichier"] = result.get("vente_fichier")
+        return result
 
     def perform_reconciliation(self) -> Dict[str, Any]:
-        """
-        Exécute le rapprochement par numéro de série (S/N) entre achats et ventes.
+        purchases = [entry for invoice in self.purchases for entry in _entries(invoice)]
+        sales = [entry for invoice in self.sales for entry in _entries(invoice)]
+        matched_sales: set[int] = set()
+        output: List[Dict[str, Any]] = []
 
-        Returns:
-            Dict[str, Any]:
-                - "items": Liste des appareils rapprochés avec détails financiers
-                - "kpi": Métriques synthétiques (taux de couverture, volume orphelin, marge)
-        """
-        # Helper pour récupérer le produit associé à un S/N dans une facture
-        def get_sn_product(inv: Dict[str, Any], target_sn: str) -> str:
-            # Recherche dans product_items si présent
-            for it in inv.get("product_items") or []:
-                if str(it.get("serial_number", "")).strip().upper() == target_sn:
-                    return it.get("product_name", "")
-            # Recherche dans product_names
-            p_names = inv.get("product_names") or []
-            if isinstance(p_names, str):
-                import json
-                try:
-                    p_names = json.loads(p_names)
-                except Exception:
-                    p_names = [p_names] if p_names else []
-            if len(p_names) == 1:
-                return p_names[0]
-            elif p_names:
-                return ", ".join(p_names)
-            return ""
-
-        # 1. Indexation des S/N côté Fournisseurs (Achats)
-        # S/N -> Liste d'entrées d'achat
-        purchases_by_sn: Dict[str, List[Dict[str, Any]]] = {}
-        for inv in self.vendor_invoices:
-            serials = inv.get("serial_numbers") or []
-            if isinstance(serials, str):
-                import json
-                try:
-                    serials = json.loads(serials)
-                except Exception:
-                    serials = []
-
-            nb_devices = max(1, len(serials))
-            # Répartition équitable du montant par appareil si facture groupée
-            unit_ht = round((inv.get("montant_ht") or 0.0) / nb_devices, 2)
-            unit_ttc = round((inv.get("montant_ttc") or 0.0) / nb_devices, 2)
-
-            for sn in serials:
-                norm_sn = str(sn).strip().upper()
-                if not norm_sn:
-                    continue
-                if norm_sn not in purchases_by_sn:
-                    purchases_by_sn[norm_sn] = []
-                purchases_by_sn[norm_sn].append({
-                    "invoice": inv,
-                    "product_name": get_sn_product(inv, norm_sn),
-                    "unit_ht": unit_ht,
-                    "unit_ttc": unit_ttc,
-                })
-
-        # 2. Indexation des S/N côté Clients (Ventes / Refacturations)
-        # S/N -> Liste d'entrées de vente
-        sales_by_sn: Dict[str, List[Dict[str, Any]]] = {}
-        for inv in self.client_invoices:
-            serials = inv.get("serial_numbers") or []
-            if isinstance(serials, str):
-                import json
-                try:
-                    serials = json.loads(serials)
-                except Exception:
-                    serials = []
-
-            nb_devices = max(1, len(serials))
-            unit_ht = round((inv.get("montant_ht") or 0.0) / nb_devices, 2)
-            unit_ttc = round((inv.get("montant_ttc") or 0.0) / nb_devices, 2)
-
-            for sn in serials:
-                norm_sn = str(sn).strip().upper()
-                if not norm_sn:
-                    continue
-                if norm_sn not in sales_by_sn:
-                    sales_by_sn[norm_sn] = []
-                sales_by_sn[norm_sn].append({
-                    "invoice": inv,
-                    "product_name": get_sn_product(inv, norm_sn),
-                    "unit_ht": unit_ht,
-                    "unit_ttc": unit_ttc,
-                })
-
-        # 3. Réconciliation avec tolérance OCR (exacte ou quasi-exacte à 1 caractère près)
-        matched_purchases: Set[str] = set()
-        matched_sales: Set[str] = set()
-
-        # Croisement des achats et ventes
-        all_serials = sorted(list(set(purchases_by_sn.keys()) | set(sales_by_sn.keys())))
-        reconciled_items: List[Dict[str, Any]] = []
-
-        total_achats_reconcilies = 0.0
-        total_ventes_reconciliees = 0.0
-        total_achats_orphelins = 0.0  # Dépenses non refacturées
-
-        rapproches_count = 0
-        orphelins_count = 0
-        achats_manquants_count = 0
-
-        # Passe 1 : Réconciliation des achats avec les ventes
-        for p_sn, p_list in purchases_by_sn.items():
-            if p_sn in matched_purchases:
+        for purchase in purchases:
+            found_index: Optional[int] = None
+            method = ""
+            if purchase.get("serial_number"):
+                for index, sale in enumerate(sales):
+                    if index in matched_sales or not sale.get("serial_number"):
+                        continue
+                    candidate = find_fuzzy_match(purchase["serial_number"], [sale["serial_number"]])
+                    if candidate:
+                        found_index, method = index, "S/N exact" if candidate == purchase["serial_number"] else "S/N tolérance OCR"
+                        break
+            if found_index is None and purchase.get("product_name"):
+                for index, sale in enumerate(sales):
+                    if index not in matched_sales and sale.get("product_name") and _product_match(purchase["product_name"], sale["product_name"]):
+                        found_index, method = index, "Marque + modèle probable"
+                        break
+            if found_index is None:
+                output.append(self._make_item(STATUS_PENDING, "Achat détecté ; aucune vente correspondante parmi les documents actuellement importés.", purchase, None, "En attente", self._credits_for(purchase["invoice"])))
                 continue
-            matched_s_sn = find_fuzzy_match(p_sn, sales_by_sn)
-            if matched_s_sn and matched_s_sn not in matched_sales:
-                matched_purchases.add(p_sn)
-                matched_sales.add(matched_s_sn)
-                s_list = sales_by_sn[matched_s_sn]
+            sale = sales[found_index]
+            matched_sales.add(found_index)
+            exact = method == "S/N exact"
+            status = STATUS_EXACT if exact else STATUS_PROBABLE
+            detail = "Même numéro de série détecté." if exact else f"Correspondance {method.lower()} ; confirmation humaine recommandée."
+            if purchase.get("quantity") != sale.get("quantity"):
+                status, detail = STATUS_REVIEW, detail + " Quantité différente."
+            output.append(self._make_item(status, detail, purchase, sale, method, self._credits_for(sale["invoice"])))
 
-                p_item = p_list[0]
-                s_item = s_list[0]
-                p_inv = p_item["invoice"]
-                s_inv = s_item["invoice"]
+        for index, sale in enumerate(sales):
+            if index not in matched_sales:
+                output.append(self._make_item(STATUS_REVIEW, "Vente détectée sans achat correspondant parmi les documents importés : à vérifier.", None, sale, "Achat à rechercher", self._credits_for(sale["invoice"])))
 
-                prix_achat_ttc = p_item["unit_ttc"]
-                prix_vente_ttc = s_item["unit_ttc"]
-                prix_achat_ht = p_item["unit_ht"]
-                prix_vente_ht = s_item["unit_ht"]
-
-                diff_ttc = round(prix_vente_ttc - prix_achat_ttc, 2)
-                if abs(diff_ttc) <= 0.05:
-                    diagnostic = "Équilibré (Refacturation exacte à 100%)"
-                elif diff_ttc > 0:
-                    diagnostic = f"Marge positive (+{diff_ttc:.2f} €)"
-                else:
-                    diagnostic = f"Attention : Vente inférieure au coût d'achat ({diff_ttc:.2f} €)"
-
-                total_achats_reconcilies += prix_achat_ttc
-                total_ventes_reconciliees += prix_vente_ttc
-                rapproches_count += 1
-
-                reconciled_items.append({
-                    "serial_number": p_sn,
-                    "produit_nom": p_item.get("product_name") or s_item.get("product_name") or "-",
-                    "status": self.STATUS_RAPPROCHE,
-                    "diagnostic": diagnostic,
-                    "fournisseur_nom": p_inv.get("fournisseur_nom") or "Fabricant",
-                    "achat_num_facture": p_inv.get("numero_facture"),
-                    "achat_date": p_inv.get("date_facture"),
-                    "achat_prix_ht": prix_achat_ht,
-                    "achat_prix_ttc": prix_achat_ttc,
-                    "achat_fichier": p_inv.get("filename"),
-                    "patient_nom": s_inv.get("patient_nom") or "Patient",
-                    "vente_num_facture": s_inv.get("numero_facture"),
-                    "vente_date": s_inv.get("date_facture"),
-                    "vente_prix_ht": prix_vente_ht,
-                    "vente_prix_ttc": prix_vente_ttc,
-                    "vente_fichier": s_inv.get("filename"),
-                    "ecart_ttc": diff_ttc,
-                })
-            else:
-                # Achats orphelins (Non refacturés)
-                matched_purchases.add(p_sn)
-                p_item = p_list[0]
-                p_inv = p_item["invoice"]
-                prix_achat_ttc = p_item["unit_ttc"]
-                prix_achat_ht = p_item["unit_ht"]
-
-                total_achats_orphelins += prix_achat_ttc
-                orphelins_count += 1
-
-                reconciled_items.append({
-                    "serial_number": p_sn,
-                    "produit_nom": p_item.get("product_name") or "-",
-                    "status": self.STATUS_NON_REFACTURE,
-                    "diagnostic": "Dépense non refacturée (aucune facture patient trouvée)",
-                    "fournisseur_nom": p_inv.get("fournisseur_nom") or "Fabricant",
-                    "achat_num_facture": p_inv.get("numero_facture"),
-                    "achat_date": p_inv.get("date_facture"),
-                    "achat_prix_ht": prix_achat_ht,
-                    "achat_prix_ttc": prix_achat_ttc,
-                    "achat_fichier": p_inv.get("filename"),
-                    "patient_nom": "-",
-                    "vente_num_facture": "-",
-                    "vente_date": "-",
-                    "vente_prix_ht": None,
-                    "vente_prix_ttc": None,
-                    "vente_fichier": None,
-                    "ecart_ttc": -prix_achat_ttc,
-                })
-
-        # Passe 2 : Ventes sans achat trouvé
-        for s_sn, s_list in sales_by_sn.items():
-            if s_sn in matched_sales:
-                continue
-            matched_sales.add(s_sn)
-            s_item = s_list[0]
-            s_inv = s_item["invoice"]
-            prix_vente_ttc = s_item["unit_ttc"]
-            prix_vente_ht = s_item["unit_ht"]
-            achats_manquants_count += 1
-
-            reconciled_items.append({
-                "serial_number": s_sn,
-                "produit_nom": s_item.get("product_name") or "-",
-                "status": self.STATUS_ACHAT_MANQUANT,
-                "diagnostic": "Facture d'achat fabricant non archivée pour cet appareil",
-                "fournisseur_nom": s_inv.get("fournisseur_nom") or "Non archivé",
-                "achat_num_facture": "-",
-                "achat_date": "-",
-                "achat_prix_ht": None,
-                "achat_prix_ttc": None,
-                "achat_fichier": None,
-                "patient_nom": s_inv.get("patient_nom") or "Non renseigné",
-                "vente_num_facture": s_inv.get("numero_facture"),
-                "vente_date": s_inv.get("date_facture"),
-                "vente_prix_ht": prix_vente_ht,
-                "vente_prix_ttc": prix_vente_ttc,
-                "vente_fichier": s_inv.get("filename"),
-                "ecart_ttc": prix_vente_ttc,
-            })
-
-        # Fin du traitement
-        all_serials = [it["serial_number"] for it in reconciled_items]
-        total_sn = len(all_serials)
-        taux_couverture = round((rapproches_count / total_sn * 100.0) if total_sn > 0 else 0.0, 1)
-
-        kpi_summary = {
-            "total_serials_detected": total_sn,
-            "rapproches_count": rapproches_count,
-            "non_refactures_count": orphelins_count,
-            "achats_manquants_count": achats_manquants_count,
-            "taux_couverture": taux_couverture,
-            "volume_achats_reconcilies": round(total_achats_reconcilies, 2),
-            "volume_ventes_reconciliees": round(total_ventes_reconciliees, 2),
-            "volume_dépenses_orphelines": round(total_achats_orphelins, 2),
-            "solde_net_reconcilie": round(total_ventes_reconciliees - total_achats_reconcilies, 2),
-        }
-
+        counts = {status: sum(item["status"] == status for item in output) for status in (STATUS_EXACT, STATUS_PROBABLE, STATUS_PENDING, STATUS_REVIEW)}
+        comparable = [item for item in output if item["prix_comparable"]]
         return {
-            "items": reconciled_items,
-            "kpi": kpi_summary,
+            "items": output,
+            "kpi": {
+                "total_items": len(output), "total_serials_detected": len(output),
+                "rapproches_count": counts[STATUS_EXACT] + counts[STATUS_PROBABLE],
+                "exact_count": counts[STATUS_EXACT], "probable_count": counts[STATUS_PROBABLE],
+                "pending_purchase_count": counts[STATUS_PENDING], "to_review_count": counts[STATUS_REVIEW],
+                "non_refactures_count": counts[STATUS_PENDING], "achats_manquants_count": counts[STATUS_REVIEW],
+                "taux_couverture": round((counts[STATUS_EXACT] + counts[STATUS_PROBABLE]) / len(output) * 100, 1) if output else 0.0,
+                "prix_unitaires_comparables": len(comparable),
+                "volume_achats_reconcilies": 0.0, "volume_ventes_reconciliees": 0.0,
+                "volume_dépenses_orphelines": 0.0, "solde_net_reconcilie": 0.0,
+            },
         }
 
 
 def reconcile_invoices(invoices: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Point d'entrée utilitaire pour le rapprochement Fournisseur / Client."""
-    engine = ReconciliationEngine(invoices)
-    return engine.perform_reconciliation()
+    return ReconciliationEngine(invoices).perform_reconciliation()

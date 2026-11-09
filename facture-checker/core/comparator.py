@@ -126,9 +126,9 @@ def compare_serial_numbers(
             detailed_matches.append({
                 "vendor_sn": v_sn,
                 "client_sn": "Non refacturé",
-                "status": STATUS_ERROR,
+                "status": STATUS_WARNING,
                 "product_name": v_model,
-                "detail": "Appareil acheté mais absent de la facture patient (perte financière ou autre patient/stock)",
+                "detail": "Appareil présent sur l'achat mais absent de cette vente : peut concerner un autre client ou être en attente.",
             })
 
     # Appareils clients sans achat correspondant sur cette facture
@@ -148,15 +148,11 @@ def compare_serial_numbers(
         return STATUS_WARNING, [], "Aucun numéro de série détecté sur les documents."
 
     unmatched_clients = [item for item in detailed_matches if item.get("vendor_sn") == "Non trouvé"]
-    has_error = any(s == STATUS_ERROR for s in statuses)
     has_warning = any(s == STATUS_WARNING for s in statuses)
 
     if all(s == STATUS_MATCH for s in statuses):
         global_status = STATUS_MATCH
         summary = f"Tous les appareils ({len(v_clean)}) sont parfaitement concordants."
-    elif has_error:
-        global_status = STATUS_ERROR
-        summary = "Attention : un ou plusieurs appareils achetés ne figurent pas sur la facture patient."
     elif unmatched_clients:
         global_status = STATUS_WARNING
         summary = f"Attention : {len(unmatched_clients)} appareil(s) vendu(s) non trouvé(s) sur ce document d'achat (ex: {unmatched_clients[0]['client_sn']})."
@@ -349,28 +345,13 @@ def compare_invoices(
     v_ttc = vendor_doc.get("montant_ttc")
     c_ttc = client_doc.get("montant_ttc")
 
-    # Montant Total HT
-    ht_status = STATUS_MATCH
-    ht_detail = ""
-    if v_ht is not None and c_ht is not None:
-        diff_ht = round(c_ht - v_ht, 2)
-        if diff_ht >= 0:
-            ht_status = STATUS_MATCH
-            ht_detail = f"Vente HT supérieure au coût d'achat (+{diff_ht:.2f} €)"
-        else:
-            ht_status = STATUS_ERROR
-            ht_detail = f"Attention : Vente HT inférieure au coût d'achat ({diff_ht:.2f} €)"
-    else:
-        ht_status = STATUS_WARNING
-        ht_detail = "Montant HT incomplet sur un des documents"
-
     rows.append({
         "label": "Total Hors Taxes (HT)",
         "category": "amount",
         "vendor_val": f"{v_ht:.2f} €" if v_ht is not None else "-",
         "client_val": f"{c_ht:.2f} €" if c_ht is not None else "-",
-        "status": ht_status,
-        "detail": ht_detail,
+        "status": STATUS_WARNING,
+        "detail": "Totaux affichés à titre documentaire : une facture fournisseur peut couvrir plusieurs clients.",
     })
 
     # Montant TVA
@@ -379,57 +360,35 @@ def compare_invoices(
         "category": "amount",
         "vendor_val": f"{v_tva:.2f} €" if v_tva is not None else "-",
         "client_val": f"{c_tva:.2f} €" if c_tva is not None else "-",
-        "status": STATUS_MATCH if (v_tva is not None and c_tva is not None) else STATUS_WARNING,
-        "detail": "TVA appliquée conforme (5,5 % prothèses médicales / 20 % accessoires)",
+        "status": STATUS_WARNING,
+        "detail": "TVA affichée à titre documentaire ; elle peut différer selon les lignes et documents.",
     })
 
     # Montant Total TTC
-    ttc_status = STATUS_MATCH
-    ttc_detail = ""
-    ecart_ttc = None
-    if v_ttc is not None and c_ttc is not None:
-        ecart_ttc = round(c_ttc - v_ttc, 2)
-        if abs(ecart_ttc) <= 0.05:
-            ttc_status = STATUS_MATCH
-            ttc_detail = "Refacturation exacte à 100% (coût et vente strictement équilibrés)"
-        elif ecart_ttc > 0:
-            ttc_status = STATUS_MATCH
-            ttc_detail = f"Refacturation patient conforme (Marge brute TTC : +{ecart_ttc:.2f} €)"
-        else:
-            ttc_status = STATUS_ERROR
-            ttc_detail = f"Alerte financière : Prix de vente inférieur aux dépenses ({ecart_ttc:.2f} €) !"
-    else:
-        ttc_status = STATUS_WARNING
-        ttc_detail = "Montant TTC manquant sur l'un des scans"
+    ecart_ttc = round(c_ttc - v_ttc, 2) if v_ttc is not None and c_ttc is not None else None
 
     rows.append({
         "label": "Montant Total TTC",
         "category": "amount",
         "vendor_val": f"{v_ttc:.2f} €" if v_ttc is not None else "-",
         "client_val": f"{c_ttc:.2f} €" if c_ttc is not None else "-",
-        "status": ttc_status,
-        "detail": ttc_detail,
+        "status": STATUS_WARNING,
+        "detail": "Totaux non utilisés pour conclure au rapprochement. La comparaison de prix nécessite des prix unitaires de ligne.",
     })
 
     # 6. Bilan & Synthèse financière
-    marge_brute = ecart_ttc if ecart_ttc is not None else 0.0
-    bilan_status = STATUS_MATCH if (marge_brute >= 0 and sn_global_status != STATUS_ERROR and prod_status != STATUS_ERROR) else STATUS_ERROR
-    if bilan_status == STATUS_MATCH and (sn_global_status == STATUS_WARNING or (prod_status == STATUS_WARNING and (v_products or c_products))):
-        bilan_status = STATUS_WARNING
-
-    bilan_message = "Dossier conforme : dépense fabricant couverte et appareils rapprochés."
-    if sn_global_status == STATUS_ERROR:
-        bilan_message = "Dossier à vérifier : anomalie sur les numéros de série d'appareils."
+    bilan_status = STATUS_MATCH if sn_global_status == STATUS_MATCH and prod_status != STATUS_ERROR else STATUS_WARNING
+    bilan_message = "Documents rapprochés : les éléments identifiants concordent."
+    if sn_global_status == STATUS_WARNING:
+        bilan_message = "Rapprochement à confirmer : certains appareils sont absents de l'un des deux documents ou nécessitent une tolérance OCR."
     elif prod_status == STATUS_ERROR:
         bilan_message = "Dossier à vérifier : divergence de modèle d'appareil entre l'achat et la vente."
-    elif marge_brute < 0:
-        bilan_message = "Déficit financier : le prix de vente est inférieur au coût d'achat !"
 
     rows.append({
         "label": "Bilan & Rapprochement",
         "category": "summary",
         "vendor_val": "Dépense Fabricant",
-        "client_val": f"Marge : +{marge_brute:.2f} €" if marge_brute >= 0 else f"Perte : {marge_brute:.2f} €",
+        "client_val": "Totaux non comparés",
         "status": bilan_status,
         "detail": bilan_message,
     })

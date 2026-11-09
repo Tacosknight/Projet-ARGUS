@@ -2,12 +2,9 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="ARGUS contrôle et rapproche localement les factures d'audioprothèse.">
     <title>ARGUS • Contrôle & Rapprochement de Factures</title>
-    <!-- Google Fonts : Plus Jakarta Sans (UI apaisante) & JetBrains Mono (chiffres tabulaires) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
             /* ── Surfaces & Fond Minéral Chaleureux (Blanc Cassé Intégral) ── */
@@ -69,8 +66,8 @@
             --duration-normal: 220ms;
 
             /* ── Polices ── */
-            --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            --font-mono: 'Cascadia Mono', 'Consolas', monospace;
 
             /* Compatibilité avec classes existantes */
             --text-main: var(--text-primary);
@@ -1468,6 +1465,10 @@
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg>
             <span>Audit des prothèses (S/N)</span>
         </button>
+        <button id="tabDiagnostics" class="tab-btn" onclick="switchTab('diagnostics')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
+            <span>Diagnostic</span>
+        </button>
     </div>
 
     <!-- VUE 1 : COMPARATEUR & SCANNER -->
@@ -1862,6 +1863,20 @@
         </div>
     </div>
 
+    <div id="viewDiagnostics" style="display: none;">
+        <div class="card">
+            <h3 style="font-size: 1.05rem; margin-bottom: 8px; color: var(--primary-deep);">Vérification de l'installation</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 14px;">Ce contrôle ne transmet aucune donnée et n'affiche aucune information patient.</p>
+            <div id="diagnosticsSummary">Cliquez sur le bouton pour contrôler ARGUS.</div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;">
+                <button type="button" class="btn-secondary" style="padding: 9px 14px;" onclick="loadDiagnostics()">Vérifier mon installation</button>
+                <a href="/api/backup" class="btn-secondary" style="padding:9px 14px; text-decoration:none;">Sauvegarder mes données</a>
+                <button type="button" class="btn-secondary" style="padding:9px 14px;" onclick="document.getElementById('restoreBackupInput').click()">Restaurer une sauvegarde</button>
+                <input id="restoreBackupInput" type="file" accept=".zip,application/zip" style="display:none" onchange="restoreBackup(this)">
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL D'ÉDITION INTERACTIVE (HUMAN-IN-THE-LOOP) -->
     <div id="editInvoiceModal" class="modal-overlay" style="display: none;">
         <div class="modal-card">
@@ -1885,9 +1900,22 @@
                         </select>
                     </div>
                     <div style="flex: 1;">
+                        <label class="meta-label">Nature du document</label>
+                        <select id="editDocumentType" class="modal-input">
+                            <option value="FACTURE">Facture</option>
+                            <option value="AVOIR">Avoir / rectification</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
                         <label class="meta-label">Numéro Facture</label>
                         <input type="text" id="editNumFacture" class="modal-input" placeholder="ex: 301/10109107">
                     </div>
+                </div>
+
+                <div>
+                    <label class="meta-label">Facture d'origine pour cet avoir</label>
+                    <select id="editRelatedInvoiceId" class="modal-input"><option value="">Aucune / non rattachée</option></select>
+                    <div style="font-size:.76rem; color:var(--text-tertiary); margin-top:4px;">ARGUS propose un rattachement ; vous conservez toujours le dernier mot.</div>
                 </div>
 
                 <div style="display: flex; gap: 10px;">
@@ -1929,6 +1957,12 @@
                 <div>
                     <label class="meta-label">Appareil(s) / Modèle(s) (séparés par des virgules)</label>
                     <textarea id="editProductNames" class="modal-input" rows="2" placeholder="ex: Phonak Audéo L30-312, Signia Pure Charge&Go 7AX"></textarea>
+                </div>
+
+                <div>
+                    <label class="meta-label">Lignes comparables (produit | quantité | prix HT unitaire | prix TTC unitaire | S/N)</label>
+                    <textarea id="editProductItems" class="modal-input" rows="4" placeholder="Phonak Audéo L30 | 1 | 450.00 | 474.75 | 2623X1XYJ&#10;Embout sur mesure | 2 | 28.00 | 29.54 |"></textarea>
+                    <div style="font-size:.76rem; color:var(--text-tertiary); margin-top:4px;">Facultatif : ARGUS compare les prix uniquement lorsqu'ils sont indiqués sur les deux lignes.</div>
                 </div>
 
                 <div style="display: flex; gap: 10px; margin-top: 8px;">
@@ -1979,15 +2013,76 @@
             document.getElementById('tabScanner').classList.toggle('active', tab === 'scanner');
             document.getElementById('tabInvoices').classList.toggle('active', tab === 'invoices');
             document.getElementById('tabReconcil').classList.toggle('active', tab === 'reconcil');
+            document.getElementById('tabDiagnostics').classList.toggle('active', tab === 'diagnostics');
 
             document.getElementById('viewScanner').style.display = tab === 'scanner' ? 'block' : 'none';
             document.getElementById('viewInvoices').style.display = tab === 'invoices' ? 'block' : 'none';
             document.getElementById('viewReconcil').style.display = tab === 'reconcil' ? 'block' : 'none';
+            document.getElementById('viewDiagnostics').style.display = tab === 'diagnostics' ? 'block' : 'none';
 
             if (tab === 'invoices') {
                 loadInvoicesList();
             } else if (tab === 'reconcil') {
                 loadReconciliationData();
+            } else if (tab === 'diagnostics') {
+                loadDiagnostics();
+            }
+        }
+
+        async function loadDiagnostics() {
+            const container = document.getElementById('diagnosticsSummary');
+            container.innerHTML = 'Vérification en cours…';
+            try {
+                const response = await fetch('/api/diagnostics');
+                const data = await response.json();
+                const checks = data.checks.map(check => `
+                    <div style="padding: 10px 0; border-bottom: 1px solid var(--border-subtle); display:flex; gap:10px; align-items:flex-start;">
+                        <strong style="color:${check.ok ? 'var(--audit-success)' : 'var(--audit-warn)'}">${check.ok ? '✓' : '!'}</strong>
+                        <div><strong>${escapeHtml(check.name)}</strong><div style="color:var(--text-secondary); font-size:.82rem; margin-top:2px;">${escapeHtml(check.detail)}</div></div>
+                    </div>`).join('');
+                container.innerHTML = `<div style="font-weight:700; margin-bottom:8px;">État : ${escapeHtml(data.status)} · ARGUS ${escapeHtml(data.version)}</div>${checks}`;
+            } catch (error) {
+                container.innerHTML = '<span style="color:var(--audit-error)">Le diagnostic local ne répond pas. Redémarrez ARGUS.</span>';
+            }
+        }
+
+        function escapeHtml(value) {
+            const element = document.createElement('div');
+            element.textContent = String(value ?? '');
+            return element.innerHTML;
+        }
+
+        async function readApiResponse(response, fallback) {
+            let data;
+            try { data = await response.json(); }
+            catch (_) { throw new Error(fallback || 'Réponse serveur illisible.'); }
+            if (!response.ok) {
+                const detail = data.detail || data.error_details || data.summary;
+                throw new Error(Array.isArray(detail) ? detail.join('\n') : (typeof detail === 'string' ? detail : fallback));
+            }
+            if (Array.isArray(data.warnings) && data.warnings.length) {
+                alert(data.warnings.join('\n'));
+            }
+            return data;
+        }
+
+        async function restoreBackup(input) {
+            if (!input.files || !input.files[0]) return;
+            if (!confirm('Cette opération remplacera les données actuelles par la sauvegarde. Continuer ?')) {
+                input.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', input.files[0]);
+            try {
+                const response = await fetch('/api/restore', { method: 'POST', body: formData });
+                const data = await readApiResponse(response, 'Restauration impossible');
+                alert(data.message);
+                loadDiagnostics();
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                input.value = '';
             }
         }
 
@@ -2223,12 +2318,7 @@
                 loadingBox.style.display = 'none';
                 btn.disabled = false;
 
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.detail || "Échec de l'analyse comparative.");
-                }
-
-                const data = await response.json();
+                const data = await readApiResponse(response, "Échec de l'analyse comparative.");
                 renderComparisonResult(data);
                 updateInvoiceCountBadge();
 
@@ -2548,8 +2638,7 @@
                 clearInterval(interval);
                 loadingBox.style.display = 'none';
 
-                if (!response.ok) throw new Error("Échec de l'analyse serveur.");
-                const data = await response.json();
+                const data = await readApiResponse(response, "Échec de l'analyse serveur.");
                 renderSingleResult(data);
                 updateInvoiceCountBadge();
 
@@ -2707,15 +2796,15 @@
                             </div>
                         </div>
                         <div class="kpi-mini-card">
-                            <div class="kpi-mini-label">Dépenses orphelines</div>
+                            <div class="kpi-mini-label">Achats en attente</div>
                             <div class="kpi-mini-val" style="color: ${kpi.non_refactures_count > 0 ? 'var(--audit-error)' : 'var(--audit-success)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
-                                ${kpi.non_refactures_count} prothèse(s)
+                                ${kpi.pending_purchase_count || 0} élément(s)
                             </div>
                         </div>
                         <div class="kpi-mini-card">
-                            <div class="kpi-mini-label">Volume non refacturé</div>
+                            <div class="kpi-mini-label">Éléments à vérifier</div>
                             <div class="kpi-mini-val" style="color: ${kpi.volume_dépenses_orphelines > 0 ? 'var(--audit-warn)' : 'var(--text-primary)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
-                                ${kpi.volume_dépenses_orphelines.toFixed(2)} €
+                                ${kpi.to_review_count || 0} élément(s)
                             </div>
                         </div>
                     </div>
@@ -2896,6 +2985,7 @@
                 document.getElementById('editInvoiceId').value = inv.id;
                 document.getElementById('editModalInvoiceIdBadge').innerText = '#' + inv.id;
                 document.getElementById('editInvoiceType').value = (inv.invoice_type || 'FOURNISSEUR').toUpperCase();
+                document.getElementById('editDocumentType').value = (inv.document_type || 'FACTURE').toUpperCase();
                 document.getElementById('editNumFacture').value = inv.numero_facture || '';
                 document.getElementById('editDateFacture').value = inv.date_facture || '';
                 document.getElementById('editFournisseur').value = inv.fournisseur_nom || '';
@@ -2909,6 +2999,13 @@
 
                 const products = Array.isArray(inv.product_names) ? inv.product_names : [];
                 document.getElementById('editProductNames').value = products.join(', ');
+                const productItems = Array.isArray(inv.product_items) ? inv.product_items : [];
+                document.getElementById('editProductItems').value = productItems.map(item => [item.product_name || item.designation || '', item.quantity || 1, item.unit_ht ?? '', item.unit_ttc ?? '', item.serial_number || ''].join(' | ')).join('\n');
+                const invoicesResponse = await fetch('/api/invoices');
+                const allInvoices = invoicesResponse.ok ? await invoicesResponse.json() : [];
+                const relatedSelect = document.getElementById('editRelatedInvoiceId');
+                relatedSelect.innerHTML = '<option value="">Aucune / non rattachée</option>' + allInvoices.filter(other => other.id !== inv.id).map(other => `<option value="${other.id}">#${other.id} · ${other.numero_facture || 'Sans numéro'}</option>`).join('');
+                relatedSelect.value = inv.related_invoice_id || '';
 
                 document.getElementById('editInvoiceModal').style.display = 'flex';
             } catch (err) {
@@ -2944,6 +3041,8 @@
 
             const payload = {
                 invoice_type: document.getElementById('editInvoiceType').value,
+                document_type: document.getElementById('editDocumentType').value,
+                related_invoice_id: document.getElementById('editRelatedInvoiceId').value || null,
                 numero_facture: document.getElementById('editNumFacture').value.trim(),
                 date_facture: document.getElementById('editDateFacture').value.trim(),
                 fournisseur_nom: document.getElementById('editFournisseur').value.trim(),
@@ -2953,6 +3052,7 @@
                 montant_ttc: ttcVal !== '' ? parseFloat(ttcVal) : null,
                 serial_numbers: document.getElementById('editSerialNumbers').value.trim(),
                 product_names: document.getElementById('editProductNames').value.trim(),
+                product_items: parseProductItems(document.getElementById('editProductItems').value),
             };
 
             try {
@@ -2962,10 +3062,7 @@
                     body: JSON.stringify(payload)
                 });
 
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || "Échec de la mise à jour.");
-                }
+                await readApiResponse(res, "Échec de la mise à jour.");
 
                 closeEditModal();
                 loadInvoicesList();
@@ -2977,6 +3074,14 @@
             }
         }
 
+        function parseProductItems(value) {
+            return value.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
+                const [product_name, quantity, unit_ht, unit_ttc, serial_number] = line.split('|').map(part => part.trim());
+                const asNumber = input => input === '' || input === undefined ? null : Number(String(input).replace(',', '.'));
+                return { product_name, designation: product_name, quantity: asNumber(quantity) || 1, unit_ht: asNumber(unit_ht), unit_ttc: asNumber(unit_ttc), serial_number: serial_number || null };
+            });
+        }
+
         async function deleteSingleInvoice(invoiceId, label) {
             if (!confirm(`Confirmez-vous la suppression de la facture "${label}" ?\n\nElle sera retirée de la base de données et de la synthèse Excel.`)) {
                 return;
@@ -2984,10 +3089,7 @@
 
             try {
                 const res = await fetch(`/api/invoices/${invoiceId}`, { method: 'DELETE' });
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || "Échec de la suppression.");
-                }
+                await readApiResponse(res, "Échec de la suppression.");
                 loadInvoicesList();
                 updateInvoiceCountBadge();
             } catch (e) {
@@ -3002,11 +3104,7 @@
 
             try {
                 const res = await fetch('/api/invoices', { method: 'DELETE' });
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || "Échec de la suppression globale.");
-                }
-                const data = await res.json();
+                const data = await readApiResponse(res, "Échec de la suppression globale.");
                 alert(data.message);
                 loadInvoicesList();
                 updateInvoiceCountBadge();

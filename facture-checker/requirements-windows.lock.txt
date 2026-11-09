@@ -1,0 +1,24 @@
+# ARGUS Windows runtime manifest (Python 3.12 / Windows x64)
+#
+# This file pins the direct runtime set used by the build. It is intentionally
+# not advertised as a cross-platform transitive lock: pip resolution and wheel
+# availability must be performed on the target Windows machine.
+fastapi==0.162.0
+uvicorn==0.54.0
+# PaddleX 3.7.x requires this distribution; do not install headless OpenCV too.
+opencv-contrib-python==4.10.0.84
+numpy==2.3.5
+paddleocr==3.7.0
+paddlepaddle==3.2.2
+paddlex==3.7.2
+PyYAML==6.0.2
+thefuzz==0.22.1
+Levenshtein==0.27.5
+openpyxl==3.1.5
+pandas==3.0.1
+Pillow==12.1.1
+python-multipart==0.0.22
+qrcode==8.2
+pypdfium2==5.6.0
+typing-extensions==4.15.0
+httpx==0.28.1
