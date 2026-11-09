@@ -15,6 +15,7 @@ import re
 import logging
 
 from core.reconciliation import find_fuzzy_match
+from core.product_policy import billable_products, has_non_sale_products
 from thefuzz import fuzz
 
 import unicodedata
@@ -78,8 +79,13 @@ def compare_serial_numbers(
     Associe les modèles d'appareils correspondants quand disponibles.
     Retourne (statut_global, liste_comparative_des_sn, diagnostic).
     """
-    v_clean = [str(s).strip().upper() for s in vendor_serials if s and str(s).strip()]
-    c_clean = [str(s).strip().upper() for s in client_serials if s and str(s).strip()]
+    v_doc = {"serial_numbers": vendor_serials, "product_items": vendor_items or []}
+    c_doc = {"serial_numbers": client_serials, "product_items": client_items or []}
+    excluded = has_non_sale_products(v_doc) or has_non_sale_products(c_doc)
+    v_view, c_view = billable_products(v_doc), billable_products(c_doc)
+    vendor_items, client_items = v_view["product_items"], c_view["product_items"]
+    v_clean = [str(s).strip().upper() for s in v_view["serial_numbers"] if s and str(s).strip()]
+    c_clean = [str(s).strip().upper() for s in c_view["serial_numbers"] if s and str(s).strip()]
 
     # Mappage rapide S/N -> Nom de modèle
     v_sn_to_model: Dict[str, str] = {}
@@ -145,6 +151,8 @@ def compare_serial_numbers(
     # Synthèse du statut S/N
     statuses = [item["status"] for item in detailed_matches]
     if not detailed_matches:
+        if excluded and not vendor_items and not client_items:
+            return STATUS_MATCH, [], "Aucun appareil commercial à rapprocher (Demo/Trial exclus)."
         return STATUS_WARNING, [], "Aucun numéro de série détecté sur les documents."
 
     unmatched_clients = [item for item in detailed_matches if item.get("vendor_sn") == "Non trouvé"]
@@ -305,9 +313,17 @@ def compare_invoices(
     })
 
     # 4. Modèles d'appareils & produits
-    v_products = vendor_doc.get("product_names") or []
-    c_products = client_doc.get("product_names") or []
+    v_billable = billable_products(vendor_doc)
+    c_billable = billable_products(client_doc)
+    v_products = v_billable["product_names"]
+    c_products = c_billable["product_names"]
+    only_non_sale = (
+        (has_non_sale_products(vendor_doc) or has_non_sale_products(client_doc))
+        and not any(v_billable[key] or c_billable[key] for key in ("product_items", "product_names", "serial_numbers"))
+    )
     prod_status, prod_detail = compare_product_names(v_products, c_products)
+    if only_non_sale:
+        prod_status, prod_detail = STATUS_MATCH, "Aucun appareil commercial à rapprocher (Demo/Trial exclus)."
 
     rows.append({
         "label": "Appareil(s) / Modèle(s)",
@@ -326,6 +342,9 @@ def compare_invoices(
     sn_global_status, sn_detailed_matches, sn_summary = compare_serial_numbers(
         v_serials, c_serials, vendor_items=v_items, client_items=c_items
     )
+    v_serials, c_serials = v_billable["serial_numbers"], c_billable["serial_numbers"]
+    if only_non_sale:
+        sn_global_status, sn_summary = STATUS_MATCH, prod_detail
 
     rows.append({
         "label": "Numéro(s) de Série (S/N)",

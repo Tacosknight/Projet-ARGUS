@@ -12,6 +12,7 @@ import logging
 import re
 from thefuzz import fuzz
 from core.post_corrector import is_phone_number
+from core.product_policy import non_sale_reason
 
 logger = logging.getLogger("FactureChecker.Parser")
 
@@ -1122,10 +1123,13 @@ class InvoiceParser:
         # 1. Association par proximité avec les numéros de série (S/N)
         for sn in serials:
             sn_prod = None
+            source_line = ""
             for idx, line in enumerate(lines):
                 if sn in line:
                     # Même ligne
                     sn_prod = match_product_in_text(line)
+                    if sn_prod:
+                        source_line = line
                     if not sn_prod:
                         # Chercher dans les lignes précédentes (jusqu'à 8 lignes au-dessus)
                         for back in range(1, 9):
@@ -1133,6 +1137,7 @@ class InvoiceParser:
                                 cand = match_product_in_text(lines[idx - back])
                                 if cand:
                                     sn_prod = cand
+                                    source_line = lines[idx - back]
                                     break
                     if not sn_prod:
                         # Chercher dans les 2 lignes suivantes
@@ -1141,14 +1146,17 @@ class InvoiceParser:
                                 cand = match_product_in_text(lines[idx + fwd])
                                 if cand:
                                     sn_prod = cand
+                                    source_line = lines[idx + fwd]
                                     break
                     break
 
             if sn_prod:
+                reason = non_sale_reason(source_line)
                 product_items.append({
                     "product_name": sn_prod,
                     "designation": sn_prod,
                     "serial_number": sn,
+                    **({"non_sale_reason": reason} if reason else {}),
                 })
                 if sn_prod not in product_names:
                     product_names.append(sn_prod)
@@ -1156,13 +1164,20 @@ class InvoiceParser:
         # 2. Détection de tous les produits présents sur le document (accessoires, chargeurs, écouteurs, etc.)
         for line in lines:
             prod = match_product_in_text(line)
-            if prod and prod not in product_names:
-                product_names.append(prod)
-                if not any(item.get("product_name") == prod or item.get("designation") == prod for item in product_items):
+            if prod:
+                if prod not in product_names:
+                    product_names.append(prod)
+                reason = non_sale_reason(line)
+                if not any(
+                    (item.get("product_name") == prod or item.get("designation") == prod)
+                    and item.get("non_sale_reason", "") == reason
+                    for item in product_items
+                ):
                     product_items.append({
                         "product_name": prod,
                         "designation": prod,
                         "serial_number": None,
+                        **({"non_sale_reason": reason} if reason else {}),
                     })
 
         # Référence article distincte du S/N, souvent sur la ligne chiffrée

@@ -13,6 +13,7 @@ import unicodedata
 from typing import Any, Dict, List, Optional, Tuple
 
 from thefuzz import fuzz
+from core.product_policy import billable_products
 
 logger = logging.getLogger("FactureChecker.Reconciliation")
 
@@ -64,6 +65,7 @@ def _normalize_product(name: str) -> str:
 
 def _entries(invoice: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Normalise les lignes disponibles sans inventer de prix unitaire."""
+    invoice = billable_products(invoice)
     items = _as_list(invoice.get("product_items"))
     serials = [str(value).strip().upper() for value in _as_list(invoice.get("serial_numbers")) if str(value).strip()]
     result: List[Dict[str, Any]] = []
