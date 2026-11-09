@@ -80,7 +80,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:MODELS_RELEASE_TAG) -or
               $env:MODELS_ASSET_NAME -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$' -or
               $env:MODELS_SHA256 -notmatch '^[a-fA-F0-9]{64}$') {
-            throw 'Tag de release, nom d’archive ZIP et empreinte SHA-256 valides sont obligatoires.'
+            throw 'Tag de release, nom de fichier ZIP et empreinte SHA-256 valides sont obligatoires.'
           }
           $download = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
           $models = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
