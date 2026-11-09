@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 import os
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 root = Path(SPECPATH).resolve().parent
 app = root / "facture-checker"
@@ -17,6 +17,11 @@ for package in ("paddle", "paddleocr", "paddlex", "cv2", "pypdfium2", "skimage")
     datas += package_datas
     binaries += package_binaries
     hiddenimports += package_hidden
+
+# PaddleX checks installed distribution metadata at runtime, including extras
+# that PyInstaller may otherwise not associate with an importable module.
+for distribution in ("imagesize", "opencv-contrib-python", "pyclipper", "pypdfium2", "python-bidi", "shapely"):
+    datas += copy_metadata(distribution)
 
 a = Analysis(
     [str(app / "launcher.py")],

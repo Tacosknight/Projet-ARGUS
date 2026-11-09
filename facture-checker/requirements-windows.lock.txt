@@ -10,7 +10,8 @@ opencv-contrib-python==4.10.0.84
 numpy==2.3.5
 paddleocr==3.7.0
 paddlepaddle==3.2.2
-paddlex==3.7.2
+# OCR pipeline requires optional PaddleX OCR dependencies.
+paddlex[ocr-core]==3.7.2
 PyYAML==6.0.2
 thefuzz==0.22.1
 Levenshtein==0.27.5
