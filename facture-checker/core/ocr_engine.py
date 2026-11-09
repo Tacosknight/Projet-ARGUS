@@ -8,6 +8,7 @@ Compatible avec PaddleOCR v2.x et v3.x.
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
+import os
 import cv2
 import numpy as np
 
@@ -109,6 +110,9 @@ class OCREngine:
                 self._ocr = PaddleOCR(lang=self.lang, **local_kwargs)
             except Exception as exc:
                 if is_frozen():
+                    logger.error("Échec d'initialisation OCR : %s", type(exc).__name__)
+                    if os.environ.get("ARGUS_OCR_DEBUG_SYNTHETIC") == "1":
+                        logger.exception("Diagnostic OCR réservé à la recette synthétique")
                     raise OCRModelError(
                         f"Impossible de charger les modèles OCR locaux ({MODELS_DIR}). "
                         "Vérifiez l'intégrité du package ARGUS."
