@@ -253,12 +253,6 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         "is_complete": len(pages_numbers) >= total_pages_declared,
     }
 
-    logger.info(
-        "Consolidation réussie de %d page(s) -> Facture '%s' | S/N total : %s | TTC : %s €",
-        len(sorted_pages),
-        numero_facture,
-        consolidated["serial_numbers"],
-        montant_ttc,
-    )
+    logger.info("Consolidation réussie de %d page(s).", len(sorted_pages))
 
     return consolidated

@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 import json
 import logging
 import sqlite3
+from contextlib import closing
+from core.data_lock import DATA_LOCK
 import pandas as pd
 
 logger = logging.getLogger("FactureChecker.Database")
@@ -41,7 +43,7 @@ class InvoiceDatabase:
 
     def init_db(self) -> None:
         """Initialise le schéma de la table invoices avec migration automatique des colonnes."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -49,6 +51,8 @@ class InvoiceDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     filename TEXT NOT NULL,
                     invoice_type TEXT DEFAULT 'FOURNISSEUR',
+                    document_type TEXT DEFAULT 'FACTURE',
+                    related_invoice_id INTEGER,
                     siret TEXT,
                     siren TEXT,
                     numero_facture TEXT,
@@ -61,6 +65,7 @@ class InvoiceDatabase:
                     patient_nom TEXT,
                     serial_numbers TEXT,
                     product_names TEXT,
+                    product_items TEXT,
                     status TEXT NOT NULL,
                     error_details TEXT,
                     unique_hash TEXT UNIQUE,
@@ -74,10 +79,16 @@ class InvoiceDatabase:
             existing_cols = {row["name"] for row in cursor.execute("PRAGMA table_info(invoices);")}
             if "invoice_type" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN invoice_type TEXT DEFAULT 'FOURNISSEUR';")
+            if "document_type" not in existing_cols:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN document_type TEXT DEFAULT 'FACTURE';")
+            if "related_invoice_id" not in existing_cols:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN related_invoice_id INTEGER;")
             if "serial_numbers" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN serial_numbers TEXT;")
             if "product_names" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN product_names TEXT;")
+            if "product_items" not in existing_cols:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN product_items TEXT;")
             if "patient_nom" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN patient_nom TEXT;")
 
@@ -86,6 +97,7 @@ class InvoiceDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_siret ON invoices(siret);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_type ON invoices(invoice_type);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_related ON invoices(related_invoice_id);")
             conn.commit()
 
     def is_hash_exists(self, unique_hash: str) -> bool:
@@ -94,7 +106,7 @@ class InvoiceDatabase:
         """
         if not unique_hash:
             return False
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT 1 FROM invoices WHERE unique_hash = ? OR unique_hash LIKE ? LIMIT 1;",
@@ -130,6 +142,9 @@ class InvoiceDatabase:
         else:
             product_names_str = str(products or "[]")
 
+        product_items = data.get("product_items", [])
+        product_items_str = json.dumps(product_items, ensure_ascii=False) if isinstance(product_items, list) else str(product_items or "[]")
+
         created_at = data.get("created_at") or datetime.now().isoformat()
         unique_hash = data.get("unique_hash")
         status = data.get("status", "A_VERIFIER")
@@ -139,13 +154,15 @@ class InvoiceDatabase:
         if status == "DOUBLON" and unique_hash:
             storage_hash = f"{unique_hash}_dup_{data.get('filename', '')}"
 
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 INSERT INTO invoices (
                     filename,
                     invoice_type,
+                    document_type,
+                    related_invoice_id,
                     siret,
                     siren,
                     numero_facture,
@@ -158,15 +175,18 @@ class InvoiceDatabase:
                     patient_nom,
                     serial_numbers,
                     product_names,
+                    product_items,
                     status,
                     error_details,
                     unique_hash,
                     created_at,
                     raw_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(unique_hash) DO UPDATE SET
                     filename = excluded.filename,
                     invoice_type = excluded.invoice_type,
+                    document_type = excluded.document_type,
+                    related_invoice_id = excluded.related_invoice_id,
                     status = excluded.status,
                     error_details = excluded.error_details,
                     montant_ht = excluded.montant_ht,
@@ -174,6 +194,7 @@ class InvoiceDatabase:
                     montant_ttc = excluded.montant_ttc,
                     serial_numbers = excluded.serial_numbers,
                     product_names = excluded.product_names,
+                    product_items = excluded.product_items,
                     patient_nom = excluded.patient_nom,
                     created_at = excluded.created_at,
                     raw_text = excluded.raw_text;
@@ -181,6 +202,8 @@ class InvoiceDatabase:
                 (
                     data.get("filename", "inconnu"),
                     invoice_type,
+                    (data.get("document_type") or "FACTURE").upper(),
+                    data.get("related_invoice_id"),
                     data.get("siret"),
                     data.get("siren"),
                     data.get("numero_facture"),
@@ -193,6 +216,7 @@ class InvoiceDatabase:
                     data.get("patient_nom") or data.get("client_nom"),
                     serial_numbers_str,
                     product_names_str,
+                    product_items_str,
                     status,
                     error_details_str,
                     storage_hash,
@@ -205,7 +229,7 @@ class InvoiceDatabase:
 
     def get_all_invoices(self) -> List[Dict[str, Any]]:
         """Retourne toutes les factures ordonnées par ID croissant."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM invoices ORDER BY id ASC;")
             rows = cursor.fetchall()
@@ -222,6 +246,11 @@ class InvoiceDatabase:
                         item["product_names"] = json.loads(item["product_names"])
                     except Exception:
                         pass
+                if item.get("product_items"):
+                    try:
+                        item["product_items"] = json.loads(item["product_items"])
+                    except Exception:
+                        item["product_items"] = []
                 if item.get("page_current") is None or item.get("page_total") is None:
                     from core.multipage import detect_pagination
                     p_c, p_t = detect_pagination(item.get("raw_text", ""))
@@ -233,7 +262,7 @@ class InvoiceDatabase:
 
     def get_invoices_by_type(self, invoice_type: str) -> List[Dict[str, Any]]:
         """Filtre les factures selon leur type (FOURNISSEUR ou CLIENT)."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM invoices WHERE UPPER(invoice_type) = UPPER(?) ORDER BY id ASC;",
@@ -253,12 +282,17 @@ class InvoiceDatabase:
                         item["product_names"] = json.loads(item["product_names"])
                     except Exception:
                         pass
+                if item.get("product_items"):
+                    try:
+                        item["product_items"] = json.loads(item["product_items"])
+                    except Exception:
+                        item["product_items"] = []
                 results.append(item)
             return results
 
     def get_invoice_by_id(self, invoice_id: int) -> Optional[Dict[str, Any]]:
         """Retourne une facture par son ID."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM invoices WHERE id = ? LIMIT 1;", (invoice_id,))
             row = cursor.fetchone()
@@ -275,6 +309,11 @@ class InvoiceDatabase:
                     item["product_names"] = json.loads(item["product_names"])
                 except Exception:
                     pass
+            if item.get("product_items"):
+                try:
+                    item["product_items"] = json.loads(item["product_items"])
+                except Exception:
+                    item["product_items"] = []
             return item
 
     def update_invoice(self, invoice_id: int, updates: Dict[str, Any]) -> bool:
@@ -291,8 +330,11 @@ class InvoiceDatabase:
             "fournisseur_nom",
             "patient_nom",
             "invoice_type",
+            "document_type",
+            "related_invoice_id",
             "serial_numbers",
             "product_names",
+            "product_items",
             "status",
             "error_details",
         ]
@@ -304,7 +346,7 @@ class InvoiceDatabase:
             if key not in allowed_fields:
                 continue
 
-            if key in ["serial_numbers", "error_details", "product_names"] and isinstance(val, (list, dict)):
+            if key in ["serial_numbers", "error_details", "product_names", "product_items"] and isinstance(val, (list, dict)):
                 val = json.dumps(val, ensure_ascii=False)
             elif key in ["montant_ht", "montant_tva", "montant_ttc"] and val is not None:
                 try:
@@ -321,7 +363,7 @@ class InvoiceDatabase:
         values.append(invoice_id)
         query = f"UPDATE invoices SET {', '.join(set_clauses)} WHERE id = ?;"
 
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(query, tuple(values))
             conn.commit()
@@ -329,7 +371,7 @@ class InvoiceDatabase:
 
     def delete_invoice(self, invoice_id: int) -> bool:
         """Supprime une facture de la base par son ID."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM invoices WHERE id = ?;", (invoice_id,))
             conn.commit()
@@ -337,7 +379,7 @@ class InvoiceDatabase:
 
     def clear_all_invoices(self) -> int:
         """Supprime toutes les factures de la base de données."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM invoices;")
             count = cursor.rowcount
@@ -346,7 +388,7 @@ class InvoiceDatabase:
 
     def get_invoices_df(self) -> pd.DataFrame:
         """Retourne toutes les factures sous forme de DataFrame pandas."""
-        with self.get_connection() as conn:
+        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
             return pd.read_sql_query("SELECT * FROM invoices ORDER BY id ASC;", conn)
 
 

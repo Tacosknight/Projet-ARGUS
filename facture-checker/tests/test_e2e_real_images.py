@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import shutil
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -20,15 +21,16 @@ import web.app as web_app
 from storage.database import InvoiceDatabase
 from core.ocr_engine import OCREngine
 
-ARTIFACTS_DIR = Path("/home/noe/.gemini/antigravity/brain/f8ffb1fe-6e53-43f8-aab0-8fd6f8f67a5c/.user_uploaded")
+ARTIFACTS_DIR = Path(os.environ.get("ARGUS_OCR_SAMPLES_DIR", str(Path(__file__).parent / "samples")))
 IMG_PAGE1 = ARTIFACTS_DIR / "media_1793635368763_34d55d6a.jpg"
 IMG_PAGE2 = ARTIFACTS_DIR / "media_1793635368777_1aec294b.jpg"
 IMG_PATIENT = ARTIFACTS_DIR / "media_1793635368783_5eab80b2.jpg"
 
 
 @unittest.skipUnless(
-    IMG_PAGE1.exists() and IMG_PAGE2.exists() and IMG_PATIENT.exists(),
-    "Échantillons d'images locales non disponibles sur cette machine (environnement CI / clone GitHub)",
+    os.environ.get("ARGUS_RUN_REAL_OCR_TESTS") == "1"
+    and IMG_PAGE1.exists() and IMG_PAGE2.exists() and IMG_PATIENT.exists(),
+    "Test OCR réel optionnel : définir ARGUS_RUN_REAL_OCR_TESTS=1 avec les échantillons locaux",
 )
 class TestEndToEndRealInvoices(unittest.TestCase):
 

@@ -164,7 +164,7 @@ class TestMultiPageAssembly(unittest.TestCase):
 
         # Find 2623X1XYJ in items
         item = next(it for it in reconcil["items"] if it["serial_number"] == "2623X1XYJ")
-        self.assertEqual(item["status"], "RAPPROCHE")
+        self.assertEqual(item["status"], "RAPPROCHE_PROBABLE")
 
 
 if __name__ == "__main__":

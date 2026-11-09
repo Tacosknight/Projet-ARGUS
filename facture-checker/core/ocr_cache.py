@@ -12,13 +12,17 @@ import json
 import logging
 from pathlib import Path
 import sqlite3
+from contextlib import closing
+from core.data_lock import DATA_LOCK
 from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 logger = logging.getLogger("FactureChecker.OCRCache")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_CACHE_DB = BASE_DIR / "ocr_cache.db"
+from core.app_paths import OCR_CACHE_PATH, ensure_app_directories
+
+ensure_app_directories()
+DEFAULT_CACHE_DB = OCR_CACHE_PATH
 
 
 def compute_image_hash(image: Union[str, Path, bytes, np.ndarray]) -> str:
@@ -67,7 +71,7 @@ class OCRResultCache:
 
     def init_db(self) -> None:
         """Initialise la table de cache OCR."""
-        with self._get_connection() as conn:
+        with DATA_LOCK, closing(self._get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -92,7 +96,7 @@ class OCRResultCache:
             logger.debug("Impossible de calculer le hash pour le cache OCR : %s", e)
             return None
 
-        with self._get_connection() as conn:
+        with DATA_LOCK, closing(self._get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT results_json FROM ocr_cache WHERE image_hash = ? LIMIT 1;",
@@ -126,7 +130,7 @@ class OCRResultCache:
             shape_str = str(image_shape) if image_shape else None
             now_iso = datetime.now().isoformat()
 
-            with self._get_connection() as conn:
+            with DATA_LOCK, closing(self._get_connection()) as conn, conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -147,7 +151,7 @@ class OCRResultCache:
 
     def clear(self) -> int:
         """Vide le cache complet et retourne le nombre d'entrées supprimées."""
-        with self._get_connection() as conn:
+        with DATA_LOCK, closing(self._get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM ocr_cache;")
             count = cursor.rowcount
@@ -156,7 +160,7 @@ class OCRResultCache:
 
     def size(self) -> int:
         """Retourne le nombre d'entrées en cache."""
-        with self._get_connection() as conn:
+        with DATA_LOCK, closing(self._get_connection()) as conn, conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) as cnt FROM ocr_cache;")
             row = cursor.fetchone()

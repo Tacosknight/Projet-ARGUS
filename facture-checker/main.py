@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional
 
 # Priorisation des chemins
@@ -34,9 +35,9 @@ from core.multipage import are_pages_of_same_invoice, consolidate_pages
 from core.reconciliation import reconcile_invoices
 from storage.database import InvoiceDatabase
 from storage.export_excel import export_to_excel
+from core.app_paths import DATABASE_PATH, EXCEL_PATH, INPUT_DIR, ensure_app_directories
+from core.document_loader import DOCUMENT_EXTENSIONS, iter_document_pages
 
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
 
 ANSI_RESET = "\033[0m"
 ANSI_BOLD = "\033[1m"
@@ -68,6 +69,8 @@ def process_single_image(
     db: InvoiceDatabase,
     forced_type: Optional[str] = None,
     save_debug_dir: Optional[Path] = None,
+    page_current: int = 1,
+    page_total: int = 1,
 ) -> Dict[str, Any]:
     filename = image_path.name
     logger.info("Traitement du fichier : %s", filename)
@@ -127,8 +130,8 @@ def process_single_image(
             "patient_nom": parsed.get("patient_nom"),
             "serial_numbers": parsed.get("serial_numbers", []),
             "raw_text": parsed.get("raw_text", ""),
-            "page_current": parsed.get("page_current", 1),
-            "page_total": parsed.get("page_total", 1),
+            "page_current": page_current if page_total > 1 else parsed.get("page_current", 1),
+            "page_total": page_total if page_total > 1 else parsed.get("page_total", 1),
         })
 
         # Assemblage multi-pages avec les factures existantes (ex: Page 1 + Page 2)
@@ -192,7 +195,7 @@ def run_batch_processing(
     # Recherche récursive ou directe des images
     image_files = sorted([
         f for f in input_dir.glob("**/*")
-        if f.is_file() and f.suffix.lower() in IMAGE_EXTENSIONS and "debug" not in f.name.lower()
+        if f.is_file() and f.suffix.lower() in DOCUMENT_EXTENSIONS and "debug" not in f.name.lower()
     ])
 
     if not image_files:
@@ -231,14 +234,33 @@ def run_batch_processing(
         elif "fournisseur" in str(img_path).lower() or "fabricant" in str(img_path).lower():
             forced = "FOURNISSEUR"
 
-        res = process_single_image(
-            image_path=img_path,
-            ocr_engine=ocr_engine,
-            validator=validator,
-            db=db,
-            forced_type=forced,
-            save_debug_dir=debug_dir,
-        )
+        pages_to_process = [(img_path, 1, 1)]
+        temporary_dir = None
+        if img_path.suffix.lower() == ".pdf":
+            temporary_dir = tempfile.TemporaryDirectory(prefix="argus-pdf-")
+            pages_to_process = []
+            for page_number, page_total, page_image in iter_document_pages(img_path):
+                page_path = Path(temporary_dir.name) / f"{img_path.stem}_p{page_number}_sur_{page_total}.jpg"
+                import cv2
+                cv2.imwrite(str(page_path), page_image)
+                pages_to_process.append((page_path, page_number, page_total))
+
+        res = None
+        for page_path, page_number, page_total in pages_to_process:
+            res = process_single_image(
+                image_path=page_path,
+                ocr_engine=ocr_engine,
+                validator=validator,
+                db=db,
+                forced_type=forced,
+                save_debug_dir=debug_dir,
+                page_current=page_number,
+                page_total=page_total,
+            )
+        if temporary_dir is not None:
+            temporary_dir.cleanup()
+        if res is None:
+            continue
         processed_count += 1
         st = res["status"]
         status_summary[st] = status_summary.get(st, 0) + 1
@@ -324,20 +346,20 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--input-dir",
         type=str,
-        default="input_photos",
-        help="Dossier contenant les photos de factures (défaut: input_photos).",
+        default=str(INPUT_DIR),
+        help="Dossier contenant les images ou PDF (défaut: dossier ARGUS de l'utilisateur).",
     )
     parser.add_argument(
         "--db-path",
         type=str,
-        default="invoices.db",
-        help="Chemin de la base de données SQLite (défaut: invoices.db).",
+        default=str(DATABASE_PATH),
+        help="Chemin de la base SQLite (défaut: dossier ARGUS de l'utilisateur).",
     )
     parser.add_argument(
         "--output-excel",
         type=str,
-        default="factures_synthese.xlsx",
-        help="Chemin du classeur Excel généré (défaut: factures_synthese.xlsx).",
+        default=str(EXCEL_PATH),
+        help="Chemin du classeur Excel (défaut: dossier ARGUS de l'utilisateur).",
     )
     parser.add_argument(
         "--save-debug",
@@ -353,6 +375,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    ensure_app_directories()
     args = parse_arguments()
     if args.web:
         from server import main as run_web_server

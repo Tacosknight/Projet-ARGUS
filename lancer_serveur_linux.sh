@@ -65,6 +65,6 @@ fi
 echo "🌐 Ouverture automatique du navigateur sur http://localhost:8000..."
 (sleep 2 && (xdg-open "http://localhost:8000" >/dev/null 2>&1 || open "http://localhost:8000" >/dev/null 2>&1 || sensible-browser "http://localhost:8000" >/dev/null 2>&1 || true)) &
 
-# 5. Lancement du serveur avec l'environnement virtuel
+# 5. Lancement local par défaut (aucune ouverture de port réseau)
 echo "🚀 Lancement du serveur web..."
-PYTHONPATH="venv/lib/python3.12/site-packages:facture-checker" ./venv/bin/python3 server.py
+PYTHONPATH="facture-checker" ./venv/bin/python3 facture-checker/server.py

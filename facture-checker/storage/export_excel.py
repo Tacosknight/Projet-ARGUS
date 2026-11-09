@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import json
 import logging
+import os
+import tempfile
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -44,7 +46,7 @@ def get_status_style(status: str) -> Dict[str, Any]:
     elif status_upper in ("ERREUR_CALCUL", "SIRET_INVALIDE", "NON_REFACTURE"):
         fill = PatternFill(start_color=COLOR_ERROR_BG, end_color=COLOR_ERROR_BG, fill_type="solid")
         font = Font(name="Calibri", size=11, bold=True, color=COLOR_ERROR_FG)
-    elif status_upper in ("DOUBLON", "A_VERIFIER", "ACHAT_NON_TROUVE"):
+    elif status_upper in ("DOUBLON", "A_VERIFIER", "ACHAT_NON_TROUVE", "RAPPROCHE_PROBABLE", "ACHAT_EN_ATTENTE", "AVOIR_RATTACHE"):
         fill = PatternFill(start_color=COLOR_WARN_BG, end_color=COLOR_WARN_BG, fill_type="solid")
         font = Font(name="Calibri", size=11, bold=True, color=COLOR_WARN_FG)
     else:
@@ -120,7 +122,17 @@ def export_to_excel(
     ws_data = wb.create_sheet(title="Détail Factures")
     _build_detail_sheet(ws_data, invoices, border_all)
 
-    wb.save(str(out_file))
+    # Fermer le fichier temporaire avant openpyxl et os.replace (Windows).
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=out_file.parent, suffix=".xlsx", delete=False) as handle:
+            temporary = Path(handle.name)
+        wb.save(str(temporary))
+        os.replace(temporary, out_file)
+    finally:
+        wb.close()
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     logger.info("Export Excel dynamique généré avec succès : %s", out_file)
     return str(out_file)
 
@@ -252,7 +264,11 @@ def _build_reconciliation_sheet(ws, items: List[Dict[str, Any]], border_all: Bor
 
     columns = [
         ("N° Série (S/N)", 18, "center", "@"),
-        ("Appareil / Modèle", 25, "left", "@"),
+        ("Méthode", 20, "center", "@"),
+        ("Produit Achat", 25, "left", "@"),
+        ("Produit Vente", 25, "left", "@"),
+        ("Qté Achat", 11, "center", "0.00"),
+        ("Qté Vente", 11, "center", "0.00"),
         ("Statut Rapprochement", 20, "center", "@"),
         ("Diagnostic & Écart", 35, "left", "@"),
         ("Fabricant / Fournisseur", 22, "left", "@"),
@@ -295,7 +311,11 @@ def _build_reconciliation_sheet(ws, items: List[Dict[str, Any]], border_all: Bor
 
         row_values = [
             item.get("serial_number"),
-            item.get("produit_nom") or "-",
+            item.get("match_method") or "-",
+            item.get("produit_achat") or "-",
+            item.get("produit_vente") or "-",
+            item.get("quantite_achat") if item.get("quantite_achat") is not None else "-",
+            item.get("quantite_vente") if item.get("quantite_vente") is not None else "-",
             status,
             item.get("diagnostic"),
             item.get("fournisseur_nom") or "-",
@@ -453,4 +473,3 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
     if invoices:
         ws.auto_filter.ref = f"A1:{get_column_letter(len(columns))}{len(invoices) + 1}"
     ws.freeze_panes = "A2"
-
