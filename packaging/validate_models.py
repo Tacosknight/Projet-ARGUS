@@ -1,10 +1,17 @@
 """Valider les modèles depuis le checkout de confiance, sans code interpolé."""
 import argparse
+import importlib.util
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "facture-checker"))
-from core.ocr_models import validate_ocr_models
+# Charger uniquement le validateur : core/__init__.py importe aussi OpenCV et
+# d'autres dépendances lourdes inutiles à cette validation statique.
+module_path = Path(__file__).resolve().parent.parent / "facture-checker" / "core" / "ocr_models.py"
+spec = importlib.util.spec_from_file_location("argus_ocr_models_validation", module_path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+validate_ocr_models = module.validate_ocr_models
 
 
 def main():
