@@ -50,6 +50,7 @@ def main():
         fixture = root / "facture été.png"
         image.save(fixture)
         environment = dict(os.environ, ARGUS_DATA_DIR=str(root / "data"),
+                           ARGUS_OCR_DEBUG_SYNTHETIC="1",
                            PADDLE_HOME=str(root / "paddle"), PADDLE_PDX_CACHE_HOME=str(root / "paddlex"))
         # Éviter qu'un chemin de développement court-circuite les modèles embarqués.
         environment.pop("ARGUS_MODELS_DIR", None)
