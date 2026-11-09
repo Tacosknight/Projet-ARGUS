@@ -25,8 +25,12 @@ def upload(url, image):
     body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.png\"\r\n"
             "Content-Type: image/png\r\n\r\n").encode() + image.read_bytes() + f"\r\n--{boundary}--\r\n".encode()
     request = urllib.request.Request(url, data=body, headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-    with urllib.request.urlopen(request, timeout=300) as response:
-        return json.load(response)
+    try:
+        with urllib.request.urlopen(request, timeout=300) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Échec HTTP {exc.code} de la recette OCR : {detail}") from exc
 
 
 def main():
@@ -74,6 +78,12 @@ def main():
                 if not response.read().startswith(b"PK"):
                     raise RuntimeError("Export Excel invalide.")
             print("EXE : interface, OCR réel et export validés. Réseau non bloqué par ce test.")
+        except Exception:
+            log_path = root / "data" / "logs" / "argus.log"
+            if log_path.is_file():
+                print("Journal technique de l'échantillon synthétique :")
+                print(log_path.read_text(encoding="utf-8", errors="replace"))
+            raise
         finally:
             process.terminate()
             try:
