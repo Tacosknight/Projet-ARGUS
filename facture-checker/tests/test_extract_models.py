@@ -21,7 +21,9 @@ class ModelArchiveTests(unittest.TestCase):
             destination.mkdir()
             with zipfile.ZipFile(archive, "w") as output:
                 for name, contents in entries:
-                    output.writestr(zipfile.ZipInfo(name), contents)
+                    info = zipfile.ZipInfo(name)
+                    info.filename = name  # Preserve malicious backslashes even on Windows.
+                    output.writestr(info, contents)
             module.extract(archive, destination)
             return {str(path.relative_to(destination)).replace("\\", "/"): path.read_bytes()
                     for path in destination.rglob("*") if path.is_file()}
