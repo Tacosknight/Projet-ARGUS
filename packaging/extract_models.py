@@ -15,6 +15,8 @@ def extract(archive_path: Path, destination: Path) -> None:
         seen = set()
         total = 0
         for member in archive.infolist():
+            if "\\" in member.orig_filename:
+                raise ValueError(f"Fichier inattendu : {member.orig_filename}")
             path = PurePosixPath(member.filename)
             if member.is_dir():
                 continue
