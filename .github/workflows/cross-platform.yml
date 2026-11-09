@@ -5,12 +5,19 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      models_url:
-        description: 'Archive HTTPS autorisée : text_detection/, text_recognition/ (optionnel textline_orientation/)'
+      models_release_tag:
+        description: 'Tag de la release privée contenant les modèles OCR'
+        default: 'ocr-models-v1'
+        required: true
+        type: string
+      models_asset_name:
+        description: 'Nom exact de l’archive ZIP de modèles jointe à la release'
+        default: 'argus-ocr-models.zip'
         required: true
         type: string
       models_sha256:
         description: 'SHA-256 de cette archive, obtenu depuis une source de confiance'
+        default: 'd406941c3c9ce9d44eaf907045e851ddeccf27464e74a86f6ffd472ba0ddf949'
         required: true
         type: string
 
@@ -57,8 +64,10 @@ jobs:
     permissions:
       contents: read
     env:
-      MODELS_URL: ${{ inputs.models_url }}
+      MODELS_RELEASE_TAG: ${{ inputs.models_release_tag }}
+      MODELS_ASSET_NAME: ${{ inputs.models_asset_name }}
       MODELS_SHA256: ${{ inputs.models_sha256 }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,14 +77,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:MODELS_URL -notmatch '^https://' -or $env:MODELS_SHA256 -notmatch '^[a-fA-F0-9]{64}$') {
-            throw 'Une URL HTTPS et une empreinte SHA-256 valide sont obligatoires.'
+          if ([string]::IsNullOrWhiteSpace($env:MODELS_RELEASE_TAG) -or
+              $env:MODELS_ASSET_NAME -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$' -or
+              $env:MODELS_SHA256 -notmatch '^[a-fA-F0-9]{64}$') {
+            throw 'Tag de release, nom d’archive ZIP et empreinte SHA-256 valides sont obligatoires.'
           }
           $download = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
           $models = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory -Path $download, $models | Out-Null
-          $archive = Join-Path $download 'models.zip'
-          Invoke-WebRequest -Uri $env:MODELS_URL -OutFile $archive
+          $archive = Join-Path $download $env:MODELS_ASSET_NAME
+          $headers = @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Headers $headers -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/releases/tags/$([uri]::EscapeDataString($env:MODELS_RELEASE_TAG))"
+          $asset = @($release.assets | Where-Object { $_.name -ceq $env:MODELS_ASSET_NAME })
+          if ($asset.Count -ne 1) { throw "Archive de modèles introuvable ou ambiguë dans la release $env:MODELS_RELEASE_TAG." }
+          Invoke-WebRequest -Headers @{ Authorization = "Bearer $env:GITHUB_TOKEN"; Accept = 'application/octet-stream' } -Uri $asset[0].url -OutFile $archive
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash -ne $env:MODELS_SHA256) {
             throw 'Empreinte des modèles incorrecte.'
           }

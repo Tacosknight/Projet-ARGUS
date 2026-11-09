@@ -97,11 +97,14 @@ de coupure électrique.
 ## CI du paquet Windows (déclenchement manuel)
 
 Le workflow **Linux and Windows validation** propose un job manuel de build et
-recette du paquet. Fournir une URL HTTPS d'archive de modèles autorisés et son
-SHA-256 obtenu indépendamment. L'archive doit contenir uniquement
-`text_detection/inference.*`, `text_recognition/inference.*` et éventuellement
-`textline_orientation/inference.*` (YAML, paramètres et graphe attendus).
-Aucun script d'une archive n'est exécuté.
+recette du paquet. Dans ce dépôt GitHub privé, il lit l’archive de modèles depuis
+une release du **même dépôt** avec le jeton éphémère du runner (`contents: read`) :
+il ne faut ni rendre les modèles publics ni fournir de jeton personnel. Les
+paramètres sont le tag de release (`ocr-models-v1` par défaut), le nom de l’asset
+ZIP (`argus-ocr-models.zip`) et son SHA-256 obtenu indépendamment. L’archive doit
+contenir uniquement `text_detection/inference.*`, `text_recognition/inference.*`
+et éventuellement `textline_orientation/inference.*` (YAML, paramètres et graphe
+attendus). Aucun script d'une archive n'est exécuté.
 
 Ce job utilise un venv Windows neuf, construit le dossier, lance `ARGUS.exe
 --no-browser`, vérifie l'interface complète, un OCR réel sur une image synthétique
