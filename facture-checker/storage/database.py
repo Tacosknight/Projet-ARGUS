@@ -77,6 +77,8 @@ class InvoiceDatabase:
 
             # Migration automatique des colonnes si table préexistante
             existing_cols = {row["name"] for row in cursor.execute("PRAGMA table_info(invoices);")}
+            if "source_documents" not in existing_cols:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN source_documents TEXT;")
             if "invoice_type" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN invoice_type TEXT DEFAULT 'FOURNISSEUR';")
             if "document_type" not in existing_cols:
@@ -180,8 +182,9 @@ class InvoiceDatabase:
                     error_details,
                     unique_hash,
                     created_at,
-                    raw_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    raw_text,
+                    source_documents
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(unique_hash) DO UPDATE SET
                     filename = excluded.filename,
                     invoice_type = excluded.invoice_type,
@@ -195,6 +198,7 @@ class InvoiceDatabase:
                     serial_numbers = excluded.serial_numbers,
                     product_names = excluded.product_names,
                     product_items = excluded.product_items,
+                    source_documents = excluded.source_documents,
                     patient_nom = excluded.patient_nom,
                     created_at = excluded.created_at,
                     raw_text = excluded.raw_text;
@@ -222,6 +226,7 @@ class InvoiceDatabase:
                     storage_hash,
                     created_at,
                     data.get("raw_text", ""),
+                    json.dumps(data.get("source_documents", []), ensure_ascii=False),
                 ),
             )
             conn.commit()
@@ -236,6 +241,7 @@ class InvoiceDatabase:
             results = []
             for row in rows:
                 item = dict(row)
+                item["source_documents"] = json.loads(item.get("source_documents") or "[]")
                 if item.get("serial_numbers"):
                     try:
                         item["serial_numbers"] = json.loads(item["serial_numbers"])
@@ -272,6 +278,7 @@ class InvoiceDatabase:
             results = []
             for row in rows:
                 item = dict(row)
+                item["source_documents"] = json.loads(item.get("source_documents") or "[]")
                 if item.get("serial_numbers"):
                     try:
                         item["serial_numbers"] = json.loads(item["serial_numbers"])
@@ -299,6 +306,7 @@ class InvoiceDatabase:
             if not row:
                 return None
             item = dict(row)
+            item["source_documents"] = json.loads(item.get("source_documents") or "[]")
             if item.get("serial_numbers"):
                 try:
                     item["serial_numbers"] = json.loads(item["serial_numbers"])

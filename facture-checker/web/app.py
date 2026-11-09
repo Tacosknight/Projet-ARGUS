@@ -140,6 +140,7 @@ def process_uploaded_invoice_files(
         safe_name = re.sub(r"[^\w.()' -]+", "_", original_name, flags=re.UNICODE).strip(" .")
         safe_filename = f"{prefix}_{timestamp_str}_p{idx}_{safe_name or 'document'}"
         saved_path = INPUT_DIR / safe_filename
+        source_documents = [{"filename": safe_filename, "original_name": original_name}]
 
         with saved_path.open("wb") as buffer:
             shutil.copyfileobj(ufile.file, buffer)
@@ -159,6 +160,7 @@ def process_uploaded_invoice_files(
                 if not ocr_results:
                     parsed_pages.append({
                         "filename": page_filename,
+                        "source_documents": source_documents,
                         "invoice_type": invoice_type or "FOURNISSEUR",
                         "status": "A_VERIFIER",
                         "error_details": ["Aucun texte lisible détecté sur cette page."],
@@ -170,6 +172,7 @@ def process_uploaded_invoice_files(
                     continue
                 p_data = parse_invoice(ocr_results, forced_type=invoice_type)
                 p_data["filename"] = page_filename
+                p_data["source_documents"] = source_documents
                 p_data["page_current"] = page_number
                 p_data["page_total"] = page_total
                 parsed_pages.append(p_data)
@@ -211,7 +214,7 @@ def process_uploaded_invoice_files(
             db.delete_invoice(replaced_old_id)
         except Exception:
             pass
-    db.save_invoice(record)
+    record["id"] = db.save_invoice(record)
 
     return record
 
@@ -341,6 +344,10 @@ async def compare_invoices_endpoint(
         # 4. Comparaison directe des deux documents
         comparison_result = compare_invoices(vendor_record, client_record)
         comparison_result["warnings"] = warnings
+        comparison_result["vendor_documents"] = invoice_documents(vendor_record)
+        comparison_result["client_documents"] = invoice_documents(client_record)
+        comparison_result["vendor_invoice_id"] = vendor_record["id"]
+        comparison_result["client_invoice_id"] = client_record["id"]
         return JSONResponse(content=comparison_result)
 
     except HTTPException:
@@ -370,7 +377,37 @@ async def get_reconciliation_report() -> JSONResponse:
 @app.get("/api/invoices")
 async def list_invoices() -> JSONResponse:
     invoices = db.get_all_invoices()
+    for invoice in invoices:
+        invoice["source_documents"] = invoice_documents(invoice)
     return JSONResponse(content=invoices)
+
+
+def invoice_documents(invoice: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Compatibilité avec les imports antérieurs à la traçabilité des originaux."""
+    documents = invoice.get("source_documents") or []
+    if documents:
+        return documents
+    names = re.sub(r" \(\d+ pages\)$", "", invoice.get("filename", "")).split(" + ")
+    return [{"filename": name, "original_name": name} for name in names if name]
+
+
+@app.get("/api/invoices/{invoice_id}/documents/{document_index}")
+async def view_invoice_document(invoice_id: int, document_index: int) -> FileResponse:
+    invoice = db.get_invoice_by_id(invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Facture introuvable.")
+    documents = invoice_documents(invoice)
+    if document_index < 0 or document_index >= len(documents):
+        raise HTTPException(status_code=404, detail="Document introuvable.")
+    document = documents[document_index]
+    root = INPUT_DIR.resolve()
+    path = (root / document["filename"]).resolve()
+    if path.parent != root or not path.is_file():
+        raise HTTPException(status_code=404, detail="Fichier original indisponible.")
+    if path.suffix.lower() not in {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}:
+        raise HTTPException(status_code=415, detail="Format non visualisable.")
+    return FileResponse(path, filename=document.get("original_name") or path.name,
+                        content_disposition_type="inline", headers={"X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/api/invoices/{invoice_id}")

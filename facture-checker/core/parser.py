@@ -57,6 +57,8 @@ HEARING_AID_PRODUCT_PATTERNS = [
     r"\b(?:[MS][ \t]+)?Receiver[ \t]+[A-Za-z0-9 \t\-.]+",
     r"\bMoxi[ \t]+[A-Za-z0-9 \t\-]+",
     # WS Audiology / Widex / Signia
+    r"\b(?:S_ITE[ \t]+)?(?:Signia[ \t]+)?(?:Silk|Insio|Styletto|Active|Motion)[ \t]+[A-Za-z0-9&. \t\-]+",
+    r"\bMINIREC\.?[ \t]+[A-Za-z0-9. \t\-]+",
     r"\b(?:Signia[ \t]+)?(?:Pure|Styletto|Silk|Insio|Active|Motion)[ \t]+Charge&Go(?:[ \t]+[0-9A-Za-z]+)?",
     r"\b(?:Signia[ \t]+)?Pure[ \t]+[A-Za-z0-9 \t\-]+",
     r"\b(?:Widex[ \t]+)?Moment[ \t]+[0-9A-Za-z]+",
@@ -295,6 +297,7 @@ class InvoiceParser:
 
     ANCHORS_DATE = [
         "date de facture",
+        "fait le",
         "en date du",
         "date facture",
         "date d'emission",
@@ -394,9 +397,9 @@ class InvoiceParser:
                 if not any(k in box_lower for k in ["s/n", "sn", "serie", "série", "serial", "n° appareil", "appareil n°"]):
                     continue
             elif category == "date":
-                if any(k in box_lower for k in ["commande", "livraison", "garantie", "échéance", "echeance", "relevé au", "releve au"]):
+                if any(k in box_lower for k in ["commande", "livraison", "garantie", "échéance", "echeance", "relevé au", "releve au", "naissance", "prescription", "expédition", "expedition", "payer avant"]):
                     continue
-                if not any(k in box_lower for k in ["date", "emise", "émise"]):
+                if not any(k in box_lower for k in ["date", "emise", "émise", "fait le"]):
                     continue
 
             best_score = 0
@@ -587,7 +590,7 @@ class InvoiceParser:
             return True
 
         # 1. Motif explicite 'N° de série : XXXXX' ou 'N° de série : XXXXX - YYYYY' (Widex, Signia)
-        for m in re.finditer(r"(?:n[°o*]?\s*(?:de\s*)?s[eé]rie|serial(?:\s*no)?)\s*[:#\-]\s*([^\n\r]+)", self.full_text, re.IGNORECASE):
+        for m in re.finditer(r"(?:num[eé]ro\s+de\s+s[eé]rie|n[°o*]?\s*(?:de\s*)?s[eé]rie|serial(?:\s*no)?)\s*[:#\-]\s*([^\n\r]+)", self.full_text, re.IGNORECASE):
             raw_val = m.group(1).strip()
             parts = re.split(r"[\s,\-/]+", raw_val)
             for part in parts:
@@ -618,7 +621,7 @@ class InvoiceParser:
         # 5. Motif facture patient sous ligne appareil : '2622x1GMK Garantie 4 ans' ou '2623X1XY) Garantle'
         for box in self.boxes:
             box_text = box.text.strip()
-            m = re.search(r"\b([0-9]{4}[A-Z0-9]{4,7})[)\s]+(?:Garantie|Garantle|Phonak|Audéo|Oticon|Widex|Signia|LPP)", box_text, re.IGNORECASE)
+            m = re.search(r"\b([A-Z0-9]{6,12})[)\s]+(?:Garantie|Garantle|Phonak|Audéo|Oticon|Widex|Signia|LPP)", box_text, re.IGNORECASE)
             if m:
                 cand = re.sub(r"[^\w\-]", "", m.group(1)).strip("-_").upper()
                 if is_valid_candidate(cand, box_context=box_text):
@@ -647,6 +650,19 @@ class InvoiceParser:
                 if box is anchor_box:
                     continue
                 dist_y = box.y_min - anchor_box.y_max
+                # Une valeur juste à droite d'un libellé n'est pas une colonne :
+                # ne pas parcourir les références des articles suivants.
+                inline_values = [b for b in self.boxes if b is not anchor_box
+                                 and b.x_min >= anchor_box.x_max - 5
+                                 and abs(b.center_y - anchor_box.center_y) <= anchor_box.height * 0.7
+                                 and re.fullmatch(r"[A-Z0-9 ,;]+", b.text, re.IGNORECASE)
+                                 and any(c.isdigit() for c in b.text)]
+                if inline_values:
+                    for value_box in inline_values:
+                        for token in value_box.text.split():
+                            if is_valid_candidate(token):
+                                serials_found.add(token.upper())
+                    break
                 if 0.0 < dist_y <= 350.0:
                     if abs(box.center_x - anchor_box.center_x) <= max(anchor_box.width * 0.7, 45.0):
                         cleaned = re.sub(r"^(?:s[/\-.]?n|sn|:|#|\s)+", "", box.text, flags=re.IGNORECASE).strip().upper()
@@ -716,11 +732,11 @@ class InvoiceParser:
         # 1. Regex directes
         patterns = [
             # Signia : "Nom du patient : beaufils"
-            r"Nom\s+du\s+patient\s*:\s*([A-ZÀ-Ÿa-z'\-\s]{2,35})",
+            r"Nom[ \t]+du[ \t]+patient[ \t]*:[ \t]*([A-ZÀ-Ÿa-z'\- \t]{2,35})",
             # L'Atelier de l'Embout : S/N suivi du nom patient puis D ou G (ex: 250618GUAN1 GUENOLE annick D DMSM)
             r"\b\d{6}[A-Z]{3,5}\d{1,2}\s+([A-ZÀ-Ÿa-z'\-\s]{3,30}?)\s+[DG]\b",
             # Standard avec séparateur obligatoire (: ou - ou #) pour ne pas capturer les en-têtes de colonnes
-            r"(?:patient(?:e)?|client(?:e)?|b[eé]n[eé]ficiaire|assur[eé](?:e)?)\s*[:#\-]\s*([A-ZÀ-Ÿa-z'\-\s]{3,35})",
+            r"(?:patient(?:e)?|client(?:e)?|b[eé]n[eé]ficiaire|assur[eé](?:e)?)[ \t]*[:#\-][ \t]*([A-ZÀ-Ÿa-z'\- \t]{3,35})",
         ]
         for pat in patterns:
             for match in re.finditer(pat, self.full_text, re.IGNORECASE):
@@ -861,22 +877,39 @@ class InvoiceParser:
         return None
 
     def extract_date(self) -> Optional[str]:
+        # Les dates personnelles, de garantie ou d'expédition ne sont jamais
+        # des dates de facture, même en l'absence d'une date d'émission lisible.
+        excluded = r"naissance|prescription|garantie|livraison|exp[eé]dition|[eé]ch[eé]ance|commande|payer avant"
+        eligible = [b for b in self.boxes if not re.search(excluded, b.text, re.IGNORECASE)]
+        for box in eligible:
+            if re.search(r"date\s+(?:de\s+)?facture|fait\s+le|[eé]mis[e]?\s+le|facture\s+du", box.text, re.IGNORECASE):
+                date = parse_date_str(box.text)
+                if date:
+                    return date
         # 1. Recherche par ancres prioritaires de facture ("Date de Facture", "En date du", "Date :")
         anchor_matches = self._find_anchor_matches(self.ANCHORS_DATE, category="date", min_score=75)
         for anchor_box, _ in anchor_matches:
             anc_lower = anchor_box.text.lower()
-            if any(k in anc_lower for k in ["commande", "livraison", "garantie", "échéance", "echeance", "relevé au", "releve au"]):
+            if re.search(excluded, anc_lower, re.IGNORECASE):
                 continue
 
             d_str = parse_date_str(anchor_box.text)
             if d_str:
                 return d_str
 
-            val_text = self._find_value_near_anchor(anchor_box, is_amount=False)
-            if val_text and isinstance(val_text, str):
-                d_str = parse_date_str(val_text)
-                if d_str:
-                    return d_str
+            # Valeur séparée : uniquement une date sur la même ligne ou la
+            # ligne suivante, sans emprunter celle d'une autre rubrique.
+            index = self.boxes.index(anchor_box)
+            candidates = [b for b in eligible if b is not anchor_box and b.width > 0
+                          and b.x_min >= anchor_box.x_max - 5
+                          and abs(b.center_y - anchor_box.center_y) <= anchor_box.height]
+            if index + 1 < len(self.boxes) and self.boxes[index + 1] in eligible:
+                candidates.append(self.boxes[index + 1])
+            for candidate in candidates:
+                if re.fullmatch(r"[\d\s./\-]+", candidate.text):
+                    d_str = parse_date_str(candidate.text)
+                    if d_str:
+                        return d_str
 
         # 2. Motifs regex explicites pour la date de facture
         date_patterns = [
@@ -887,13 +920,13 @@ class InvoiceParser:
             r"(?:date)[\s.:#\-]+(\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})",
         ]
         for pat in date_patterns:
-            m = re.search(pat, self.full_text, re.IGNORECASE)
+            m = re.search(pat, "\n".join(b.text for b in eligible), re.IGNORECASE)
             if m:
                 d = parse_date_str(m.group(1))
                 if d:
                     return d
 
-        return parse_date_str(self.full_text)
+        return None
 
     def extract_amounts(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         montant_ttc: Optional[float] = None
@@ -903,11 +936,13 @@ class InvoiceParser:
         # 1. Vérification spécifique pour les tables de synthèse (ex: Ligne 'Total' avec HT, TTC, TVA sur la même ligne)
         for box in self.boxes:
             b_text = box.text.strip().lower()
-            if b_text in ["total", "totaux"]:
+            if b_text in ["total", "totaux", "montant total"]:
+                if box.width == 0:
+                    continue
                 y_c = box.center_y
                 row_amts = []
                 for other in self.boxes:
-                    if abs(other.center_y - y_c) < 18 and other.center_x > box.x_max - 5:
+                    if other is not box and abs(other.center_y - y_c) < 18 and other.center_x > box.x_max - 5:
                         amt = other.contains_amount()
                         if amt is not None and "%" not in other.text:
                             row_amts.append((other.center_x, amt))
@@ -923,6 +958,14 @@ class InvoiceParser:
                     if len(sorted_vals) >= 3:
                         montant_tva = sorted_vals[2]
                     break
+
+        # Total imprimé sur une seule ligne : HT/TVA/TTC (fournisseur)
+        # ou HT/TTC/TVA (vente). Ne jamais additionner des colonnes du tableau.
+        for box in self.boxes:
+            if re.match(r"^(?:montant\s+total|total)\s+\d", box.text, re.IGNORECASE):
+                values = [clean_amount(m.group(0)) for m in re.finditer(r"\d+(?:[ \u00a0]\d{3})*[,.]\d{2}\b", box.text)]
+                if len(values) == 3 and abs(sum(sorted(values)[:2]) - max(values)) < 0.05:
+                    montant_tva, montant_ht, montant_ttc = sorted(values)
 
         # 2. Recherche standard via ancres spatiales si non trouvé
         if montant_ttc is None:
@@ -1069,6 +1112,11 @@ class InvoiceParser:
                     cand = clean_product_name(m.group(0))
                     if len(cand) >= 3 and not is_phone_number(cand):
                         return cand
+            # Modèles inconnus : accepter une désignation explicitement
+            # étiquetée, pas n'importe quel texte après un fournisseur/adresse.
+            labelled = re.match(r"^(?:mod[eè]le|d[eé]signation|appareil)[ \t]*:[ \t]*(.+)$", line_str, re.IGNORECASE)
+            if labelled:
+                return clean_product_name(labelled.group(1)) or None
             return None
 
         # 1. Association par proximité avec les numéros de série (S/N)
@@ -1117,6 +1165,15 @@ class InvoiceParser:
                         "serial_number": None,
                     })
 
+        # Référence article distincte du S/N, souvent sur la ligne chiffrée
+        # immédiatement au-dessus de la désignation fournisseur.
+        for item in product_items:
+            for index, line in enumerate(lines):
+                if match_product_in_text(line) == item["product_name"] and index > 0:
+                    reference = re.match(r"^\d+[ \t]+(\d{6,12})\b", lines[index - 1])
+                    if reference:
+                        item["reference"] = reference.group(1)
+                        break
         return product_names, product_items
 
     def parse(self) -> Dict[str, Any]:

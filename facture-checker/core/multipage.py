@@ -230,6 +230,8 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_pages_declared = max((p.get("page_total", 1) for p in sorted_pages), default=len(sorted_pages))
 
     consolidated = {
+        "source_documents": list({doc["filename"]: doc for p in sorted_pages
+                                  for doc in p.get("source_documents", [])}.values()),
         "filename": combined_filename,
         "invoice_type": invoice_type,
         "siret": siret,
