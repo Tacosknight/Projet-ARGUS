@@ -104,7 +104,8 @@ paramètres sont le tag de release (`ocr-models-v1` par défaut), le nom de l’
 ZIP (`argus-ocr-models.zip`) et son SHA-256 obtenu indépendamment. L’archive doit
 contenir uniquement `text_detection/inference.*`, `text_recognition/inference.*`
 et éventuellement `textline_orientation/inference.*` (YAML, paramètres et graphe
-attendus). Aucun script d'une archive n'est exécuté.
+attendus), à la racine ou sous le préfixe `models/`. Aucun script d'une archive
+n'est exécuté.
 
 Ce job utilise un venv Windows neuf, construit le dossier, lance `ARGUS.exe
 --no-browser`, vérifie l'interface complète, un OCR réel sur une image synthétique

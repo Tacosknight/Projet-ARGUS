@@ -18,18 +18,19 @@ def extract(archive_path: Path, destination: Path) -> None:
             path = PurePosixPath(member.filename)
             if member.is_dir():
                 continue
-            if (len(path.parts) != 2 or path.parts[0] not in roles or path.parts[1] not in allowed
+            parts = path.parts[1:] if path.parts[:1] == ("models",) else path.parts
+            if (len(parts) != 2 or parts[0] not in roles or parts[1] not in allowed
                     or "\\" in member.filename or path.is_absolute()):
                 raise ValueError(f"Fichier inattendu : {member.filename}")
-            if member.filename in seen:
+            if parts in seen:
                 raise ValueError("Fichier dupliqué.")
-            seen.add(member.filename)
+            seen.add(parts)
             total += member.file_size
             if total > 4 * 1024 ** 3:
                 raise ValueError("Archive trop volumineuse.")
-            selected.append(member)
-        for member in selected:
-            target = destination.joinpath(*PurePosixPath(member.filename).parts)
+            selected.append((member, parts))
+        for member, parts in selected:
+            target = destination.joinpath(*parts)
             target.parent.mkdir(exist_ok=True)
             with archive.open(member) as source, target.open("xb") as output:
                 shutil.copyfileobj(source, output)
