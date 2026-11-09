@@ -132,6 +132,17 @@ facture-checker/
 
 ## Démarrage Rapide
 
+### Télécharger une version
+
+Les versions publiées sont disponibles dans [Releases](../../releases) (un accès au dépôt est nécessaire s'il est privé). Choisissez les fichiers joints à une version publiée :
+
+- **Windows** : `ARGUS-<version>-Windows.zip`, package portable à extraire entièrement.
+- **Linux** : `ARGUS-<version>-Linux-sources.tar.gz`, sources avec modèles OCR. Ce n'est pas un exécutable autonome : Python, les dépendances système et un accès Internet pour installer les dépendances Python peuvent être nécessaires. Extrayez l'archive puis lancez `./lancer_serveur_linux.sh` depuis le dossier `ARGUS`.
+
+Chaque archive est accompagnée d'un fichier `.sha256`. Sous Linux, placez les deux fichiers dans le même dossier puis lancez `sha256sum -c nom-de-l-archive.sha256`. Sous Windows, utilisez `Get-FileHash chemin-vers-l-archive -Algorithm SHA256` dans PowerShell et comparez le résultat avec le contenu du fichier `.sha256`.
+
+Les fichiers ne sont disponibles qu'une fois une release préparée, vérifiée et publiée ; les anciennes releases peuvent ne pas en contenir. Pour préparer une nouvelle version, consultez [la procédure de release](packaging/README_RELEASE.md).
+
 ### 1. Lancement 1-Clic
 
 Des lanceurs automatisés permettent de démarrer l'application sans configuration manuelle préalable :

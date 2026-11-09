@@ -1,0 +1,123 @@
+name: Préparer une release ARGUS
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version à créer, par exemple v1.3.0 (un nouveau tag sera créé)'
+        required: true
+        type: string
+      models_release_tag:
+        description: 'Tag de la release contenant les modèles OCR'
+        default: 'ocr-models-v1'
+        required: true
+        type: string
+      models_sha256:
+        description: 'SHA-256 de argus-ocr-models.zip, vérifié auprès d’une source de confiance'
+        default: 'd406941c3c9ce9d44eaf907045e851ddeccf27464e74a86f6ffd472ba0ddf949'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: Linux
+          - os: windows-latest
+            platform: Windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ inputs.version }}
+      MODELS_TAG: ${{ inputs.models_release_tag }}
+      MODELS_SHA256: ${{ inputs.models_sha256 }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install model validation dependency
+        run: python -m pip install PyYAML==6.0.2
+      - name: Validate version and download models
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || { printf 'Version invalide\n'; exit 1; }
+          [[ "$MODELS_SHA256" =~ ^[a-fA-F0-9]{64}$ ]] || { printf 'SHA-256 invalide\n'; exit 1; }
+          mkdir -p "$RUNNER_TEMP/argus-download" "$RUNNER_TEMP/argus-models"
+          gh release download "$MODELS_TAG" --pattern argus-ocr-models.zip --dir "$RUNNER_TEMP/argus-download"
+          python -I -c 'import hashlib,os,pathlib,sys; p=pathlib.Path(sys.argv[1]); assert hashlib.sha256(p.read_bytes()).hexdigest().lower() == os.environ["MODELS_SHA256"].lower(), "Empreinte incorrecte"' "$RUNNER_TEMP/argus-download/argus-ocr-models.zip"
+          python -I packaging/extract_models.py "$RUNNER_TEMP/argus-download/argus-ocr-models.zip" "$RUNNER_TEMP/argus-models"
+          python -I packaging/validate_models.py "$RUNNER_TEMP/argus-models"
+      - name: Build and test Windows package
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $params = @{
+            DetectionModel = Join-Path $env:RUNNER_TEMP 'argus-models/text_detection'
+            RecognitionModel = Join-Path $env:RUNNER_TEMP 'argus-models/text_recognition'
+          }
+          $orientation = Join-Path $env:RUNNER_TEMP 'argus-models/textline_orientation'
+          if (Test-Path $orientation) { $params.OrientationModel = $orientation }
+          ./packaging/build_windows.ps1 @params
+          python -m pip install Pillow==12.1.1
+          if ($LASTEXITCODE -ne 0) { throw 'Installation de Pillow échouée.' }
+          python -I packaging/smoke_windows.py dist/ARGUS/ARGUS.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Test du paquet Windows échoué.' }
+          New-Item -ItemType Directory -Path release-files | Out-Null
+          Compress-Archive -Path dist/ARGUS -DestinationPath "release-files/ARGUS-$env:VERSION-Windows.zip"
+      - name: Package Linux sources and models
+        if: matrix.platform == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/linux/ARGUS" release-files
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/linux/ARGUS"
+          mkdir -p "$RUNNER_TEMP/linux/ARGUS/models"
+          cp -R "$RUNNER_TEMP/argus-models/." "$RUNNER_TEMP/linux/ARGUS/models/"
+          tar -czf "release-files/ARGUS-${VERSION}-Linux-sources.tar.gz" -C "$RUNNER_TEMP/linux" ARGUS
+      - name: Create checksum
+        shell: bash
+        run: |
+          python -I -c 'import hashlib,pathlib; files=list(pathlib.Path("release-files").iterdir()); assert len(files)==1; p=files[0]; p.with_name(p.name+".sha256").write_text(hashlib.sha256(p.read_bytes()).hexdigest()+"  "+p.name+"\n", encoding="ascii")'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: release-files/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      TARGET_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-files
+          merge-multiple: true
+      - name: Create draft release without overwriting existing versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            printf 'Le tag %s existe déjà ; choisissez une nouvelle version.\n' "$VERSION"
+            exit 1
+          fi
+          gh release create "$VERSION" release-files/* --draft --target "$TARGET_COMMIT" --title "ARGUS $VERSION" --notes 'Brouillon à vérifier avant publication. Windows : archive portable. Linux : sources et modèles OCR, avec installation des dépendances nécessaire. Vérifiez les sommes SHA-256 et effectuez la recette sur les systèmes visés.'
