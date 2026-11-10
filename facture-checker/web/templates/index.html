@@ -1837,6 +1837,10 @@
                 </div>
             </div>
 
+            <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
+                <label style="flex:1; min-width:200px;">Numéro de facture<br><input id="invoiceNumberSearch" type="search" placeholder="Rechercher un numéro" oninput="renderInvoicesList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:200px;">Fournisseur<br><input id="invoiceSupplierSearch" type="search" placeholder="Rechercher un fournisseur" oninput="renderInvoicesList()" style="width:100%;"></label>
+            </div>
             <!-- Liste des factures -->
             <div id="invoicesListContainer"></div>
         </div>
@@ -1851,6 +1855,12 @@
             <div id="recSummary" style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">
                 Chargement des données...
             </div>
+            <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+                <label style="flex:2; min-width:200px;">Recherche globale<br><input id="recSearch" type="search" placeholder="S/N, patient, produit, facture…" oninput="renderReconciliationList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:180px;">Fournisseur<br><input id="recSupplierSearch" type="search" placeholder="Filtrer par fournisseur" oninput="renderReconciliationList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:180px;">Tri<br><select id="recSort" onchange="renderReconciliationList()" style="width:100%;"><option value="original">Ordre initial</option><option value="supplier-asc">Fournisseur A–Z</option><option value="supplier-desc">Fournisseur Z–A</option></select></label>
+            </div>
+            <div id="recResultCount" aria-live="polite" style="font-size:.85rem; color:var(--text-secondary); margin-bottom:8px;"></div>
             <div id="recList"></div>
             <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
                 <a href="/api/export" class="btn-excel" style="flex: 1; min-width: 200px; margin-top: 0;">
@@ -2835,16 +2845,72 @@
         // ==========================================
         // ONGLET 2 : AUDIT GLOBAL RAPPROCHEMENT
         // ==========================================
+        // Fonctions pures partagées par les deux registres.
+        function normalizeSearch(value) {
+            return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase('fr').trim();
+        }
+
+        function invoiceDateKey(value) {
+            const text = String(value || '').trim();
+            let match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+            let year, month, day;
+            if (match) [, year, month, day] = match;
+            else {
+                match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+                if (!match) return null;
+                [, day, month, year] = match;
+            }
+            const y = Number(year), m = Number(month), d = Number(day);
+            const date = new Date(0);
+            date.setUTCFullYear(y, m - 1, d);
+            if (y < 1 || date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
+            return y * 10000 + m * 100 + d;
+        }
+
+        function filterInvoices(invoices, number, supplier) {
+            const n = normalizeSearch(number), s = normalizeSearch(supplier);
+            return invoices.filter(inv => normalizeSearch(inv.numero_facture).includes(n) && normalizeSearch(inv.fournisseur_nom).includes(s))
+                .sort((a, b) => {
+                    const da = invoiceDateKey(a.date_facture), db = invoiceDateKey(b.date_facture);
+                    if (da === null && db !== null) return 1;
+                    if (db === null && da !== null) return -1;
+                    return (db ?? 0) - (da ?? 0) || (Number(b.id) || 0) - (Number(a.id) || 0);
+                });
+        }
+
+        function filterReconciliation(items, query, supplier, sort) {
+            const q = normalizeSearch(query), s = normalizeSearch(supplier);
+            const fields = ['serial_number', 'fournisseur_nom', 'patient_nom', 'produit_nom', 'produit_achat', 'produit_vente', 'achat_num_facture', 'vente_num_facture', 'diagnostic'];
+            const result = items.filter(item => fields.some(field => normalizeSearch(item[field]).includes(q)) && normalizeSearch(item.fournisseur_nom === '—' ? '' : item.fournisseur_nom).includes(s));
+            if (sort === 'supplier-asc' || sort === 'supplier-desc') {
+                const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+                result.sort((a, b) => {
+                    const left = a.fournisseur_nom && a.fournisseur_nom !== '—' ? a.fournisseur_nom : '';
+                    const right = b.fournisseur_nom && b.fournisseur_nom !== '—' ? b.fournisseur_nom : '';
+                    if (!left || !right) return left ? -1 : right ? 1 : 0;
+                    return collator.compare(left, right) * (sort === 'supplier-desc' ? -1 : 1);
+                });
+            }
+            return result;
+        }
+
+        let reconciliationItems = null;
+        let reconciliationRequest = 0;
         async function loadReconciliationData() {
             const list = document.getElementById('recList');
             const summary = document.getElementById('recSummary');
+            const request = ++reconciliationRequest;
+            reconciliationItems = null;
+            document.getElementById('recResultCount').textContent = '';
             list.innerHTML = "<div style='text-align:center; padding:20px;'>Chargement...</div>";
 
             try {
                 const res = await fetch('/api/reconciliation');
+                if (!res.ok) throw new Error('Erreur de récupération de l’audit.');
                 const data = await res.json();
+                if (request !== reconciliationRequest) return;
                 const kpi = data.kpi;
-                const items = data.items;
+                reconciliationItems = data.items;
 
                 summary.innerHTML = `
                     <div class="compare-kpi-grid" style="margin-bottom: 14px;">
@@ -2869,9 +2935,22 @@
                     </div>
                 `;
 
+                renderReconciliationList();
+            } catch (err) {
+                if (request !== reconciliationRequest) return;
+                summary.textContent = 'Impossible de charger les indicateurs.';
+                list.innerHTML = "<div style='color:red;'>Erreur de chargement.</div>";
+            }
+        }
+
+        function renderReconciliationList() {
+                if (!reconciliationItems) return;
+                const list = document.getElementById('recList');
+                const items = filterReconciliation(reconciliationItems, document.getElementById('recSearch').value, document.getElementById('recSupplierSearch').value, document.getElementById('recSort').value);
+                document.getElementById('recResultCount').textContent = `${items.length} résultat(s) sur ${reconciliationItems.length} · Indicateurs et export : ensemble des données`;
                 list.innerHTML = "";
                 if (items.length === 0) {
-                    list.innerHTML = "<div style='text-align:center; padding:16px; color:var(--text-tertiary);'>Aucune prothèse auditive détectée pour l'instant.</div>";
+                    list.textContent = reconciliationItems.length ? 'Aucun résultat pour ces critères.' : 'Aucune prothèse auditive détectée pour l’instant.';
                     return;
                 }
 
@@ -2909,10 +2988,6 @@
                     `;
                     list.appendChild(div);
                 });
-
-            } catch (err) {
-                list.innerHTML = "<div style='color:red;'>Erreur de chargement.</div>";
-            }
         }
 
         // ==========================================
@@ -2938,21 +3013,39 @@
             }
         }
 
+        let invoiceItems = null;
+        let invoiceRequest = 0;
         async function loadInvoicesList() {
             const container = document.getElementById('invoicesListContainer');
             const summary = document.getElementById('invoicesSummaryText');
             if (!container) return;
 
+            const request = ++invoiceRequest;
+            invoiceItems = null;
+            summary.textContent = 'Chargement du registre...';
             container.innerHTML = "<div style='text-align:center; padding:24px; color:var(--text-secondary);'>Chargement des factures...</div>";
 
             try {
                 const res = await fetch('/api/invoices');
                 if (!res.ok) throw new Error("Erreur de récupération des factures.");
                 const invoices = await res.json();
-
+                if (request !== invoiceRequest) return;
+                invoiceItems = invoices || [];
                 updateInvoiceCountBadge();
+                renderInvoicesList();
+            } catch (e) {
+                if (request !== invoiceRequest) return;
+                summary.textContent = 'Impossible de charger le registre.';
+                container.textContent = `Erreur : ${e.message}`;
+            }
+        }
 
-                if (!invoices || invoices.length === 0) {
+        function renderInvoicesList() {
+                if (!invoiceItems) return;
+                const container = document.getElementById('invoicesListContainer');
+                const summary = document.getElementById('invoicesSummaryText');
+                const invoices = invoiceItems;
+                if (invoices.length === 0) {
                     summary.innerText = "0 facture enregistrée en base";
                     container.innerHTML = `
                         <div style="text-align: center; padding: 40px 16px; color: var(--text-secondary);">
@@ -2968,10 +3061,12 @@
                     return;
                 }
 
-                summary.innerText = `${invoices.length} facture(s) enregistrée(s) en base (SQLite & Excel)`;
-
-                // Afficher de la plus récente à la plus ancienne
-                const sortedInvoices = [...invoices].reverse();
+                const sortedInvoices = filterInvoices(invoices, document.getElementById('invoiceNumberSearch').value, document.getElementById('invoiceSupplierSearch').value);
+                summary.innerText = `${sortedInvoices.length} facture(s) affichée(s) sur ${invoices.length} enregistrée(s)`;
+                if (!sortedInvoices.length) {
+                    container.textContent = 'Aucune facture ne correspond à ces critères.';
+                    return;
+                }
 
                 container.innerHTML = sortedInvoices.map(inv => {
                     const isVendor = (inv.invoice_type || 'FOURNISSEUR').toUpperCase() === 'FOURNISSEUR';
@@ -3030,10 +3125,6 @@
                         </div>
                     `;
                 }).join('');
-
-            } catch (e) {
-                container.innerHTML = `<div style="color:var(--audit-error); padding:16px;">Erreur : ${e.message}</div>`;
-            }
         }
 
         // ==========================================
