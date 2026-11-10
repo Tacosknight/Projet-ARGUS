@@ -71,6 +71,7 @@ def process_single_image(
     save_debug_dir: Optional[Path] = None,
     page_current: int = 1,
     page_total: int = 1,
+    pdf_source_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     filename = image_path.name
     logger.info("Traitement du fichier : %s", filename)
@@ -97,22 +98,33 @@ def process_single_image(
     }
 
     try:
-        # 1. Vision et pré-traitement
-        preprocessed = preprocess_image(image_path, target_height=1600, apply_threshold=True)
+        # Une page PDF n'utilise le texte natif que si le sélecteur l'accepte.
+        ocr_results = None
+        if pdf_source_path is not None:
+            try:
+                from core.pdf_native import native_pdf_page
+                ocr_results, _reason = native_pdf_page(pdf_source_path, page_current)
+            except Exception:
+                # Ne pas journaliser l'exception : elle peut contenir du texte sensible.
+                logger.warning("Extraction native PDF impossible, repli sur l'OCR (page %s).", page_current)
+            logger.info("Page PDF %s/%s : %s", page_current, page_total,
+                        "texte natif" if ocr_results else "OCR")
 
-        if save_debug_dir:
-            save_debug_dir.mkdir(parents=True, exist_ok=True)
-            import cv2
-            debug_out = save_debug_dir / f"preprocessed_{filename}"
-            cv2.imwrite(str(debug_out), preprocessed)
-
-        # 2. OCR PaddleOCR
-        ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
         if not ocr_results:
-            invoice_record["status"] = "A_VERIFIER"
-            invoice_record["error_details"] = ["Aucun texte lisible détecté par l'OCR sur cette image."]
-            db.save_invoice(invoice_record)
-            return invoice_record
+            preprocessed = preprocess_image(image_path, target_height=1600, apply_threshold=True)
+
+            if save_debug_dir:
+                save_debug_dir.mkdir(parents=True, exist_ok=True)
+                import cv2
+                debug_out = save_debug_dir / f"preprocessed_{filename}"
+                cv2.imwrite(str(debug_out), preprocessed)
+
+            ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
+            if not ocr_results:
+                invoice_record["status"] = "A_VERIFIER"
+                invoice_record["error_details"] = ["Aucun texte lisible détecté par l'OCR sur cette image."]
+                db.save_invoice(invoice_record)
+                return invoice_record
 
         # 3. Parsing (métadonnées, S/N et type de facture)
         parsed = parse_invoice(ocr_results, forced_type=forced_type)
@@ -234,31 +246,35 @@ def run_batch_processing(
         elif "fournisseur" in str(img_path).lower() or "fabricant" in str(img_path).lower():
             forced = "FOURNISSEUR"
 
-        pages_to_process = [(img_path, 1, 1)]
         temporary_dir = None
-        if img_path.suffix.lower() == ".pdf":
-            temporary_dir = tempfile.TemporaryDirectory(prefix="argus-pdf-")
-            pages_to_process = []
-            for page_number, page_total, page_image in iter_document_pages(img_path):
-                page_path = Path(temporary_dir.name) / f"{img_path.stem}_p{page_number}_sur_{page_total}.jpg"
-                import cv2
-                cv2.imwrite(str(page_path), page_image)
-                pages_to_process.append((page_path, page_number, page_total))
-
         res = None
-        for page_path, page_number, page_total in pages_to_process:
-            res = process_single_image(
-                image_path=page_path,
-                ocr_engine=ocr_engine,
-                validator=validator,
-                db=db,
-                forced_type=forced,
-                save_debug_dir=debug_dir,
-                page_current=page_number,
-                page_total=page_total,
-            )
-        if temporary_dir is not None:
-            temporary_dir.cleanup()
+        try:
+            pages_to_process = [(img_path, 1, 1)]
+            if img_path.suffix.lower() == ".pdf":
+                temporary_dir = tempfile.TemporaryDirectory(prefix="argus-pdf-")
+                pages_to_process = []
+                for page_number, page_total, page_image in iter_document_pages(img_path):
+                    page_path = Path(temporary_dir.name) / f"{img_path.stem}_p{page_number}_sur_{page_total}.jpg"
+                    import cv2
+                    if not cv2.imwrite(str(page_path), page_image):
+                        raise OSError("Impossible d'écrire l'image temporaire de la page PDF")
+                    pages_to_process.append((page_path, page_number, page_total))
+
+            for page_path, page_number, page_total in pages_to_process:
+                res = process_single_image(
+                    image_path=page_path,
+                    ocr_engine=ocr_engine,
+                    validator=validator,
+                    db=db,
+                    forced_type=forced,
+                    save_debug_dir=debug_dir,
+                    page_current=page_number,
+                    page_total=page_total,
+                    pdf_source_path=img_path if img_path.suffix.lower() == ".pdf" else None,
+                )
+        finally:
+            if temporary_dir is not None:
+                temporary_dir.cleanup()
         if res is None:
             continue
         processed_count += 1

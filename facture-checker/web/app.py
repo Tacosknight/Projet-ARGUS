@@ -49,6 +49,7 @@ from core.app_paths import (
     ensure_app_directories,
 )
 from core.document_loader import iter_document_pages
+from core.pdf_native import native_pdf_page
 from storage.database import InvoiceDatabase
 from storage.export_excel import export_to_excel
 from storage.backup import apply_restore, extract_backup, snapshot_sqlite, RecoveryError
@@ -132,6 +133,7 @@ def process_uploaded_invoice_files(
 
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     parsed_pages: List[Dict[str, Any]] = []
+    extraction_pages: List[Dict[str, Any]] = []
 
     for idx, ufile in enumerate(uploaded_files, 1):
         if not ufile.filename:
@@ -155,8 +157,18 @@ def process_uploaded_invoice_files(
                     if not encoded_ok:
                         raise OSError("Impossible d'encoder la page PDF en image.")
                     (INPUT_DIR / page_filename).write_bytes(encoded.tobytes())
-                preprocessed = preprocess_image(bgr_img, target_height=2400, apply_threshold=False)
-                ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
+                ocr_results = None
+                if saved_path.suffix.lower() == ".pdf":
+                    try:
+                        ocr_results, reason = native_pdf_page(saved_path, page_number)
+                        logger.info("Extraction PDF page %d : %s", page_number, "texte natif" if ocr_results else "OCR")
+                    except Exception:
+                        logger.warning("Extraction PDF native indisponible sur la page %d ; OCR utilisé.", page_number)
+                source = "pdf_text" if ocr_results else "ocr"
+                if not ocr_results:
+                    preprocessed = preprocess_image(bgr_img, target_height=2400, apply_threshold=False)
+                    ocr_results = ocr_engine.extract_text_and_boxes(preprocessed)
+                extraction_pages.append({"document": idx, "page": page_number, "total": page_total, "source": source, "text_detected": bool(ocr_results)})
                 if not ocr_results:
                     parsed_pages.append({
                         "filename": page_filename,
@@ -215,6 +227,8 @@ def process_uploaded_invoice_files(
         except Exception:
             pass
     record["id"] = db.save_invoice(record)
+    # Informations de traitement transitoires : ne modifient pas le schéma historique.
+    record["extraction_pages"] = extraction_pages
 
     return record
 
@@ -343,6 +357,8 @@ async def compare_invoices_endpoint(
 
         # 4. Comparaison directe des deux documents
         comparison_result = compare_invoices(vendor_record, client_record)
+        comparison_result["vendor_extraction_pages"] = vendor_record.get("extraction_pages", [])
+        comparison_result["client_extraction_pages"] = client_record.get("extraction_pages", [])
         comparison_result["warnings"] = warnings
         comparison_result["vendor_documents"] = invoice_documents(vendor_record)
         comparison_result["client_documents"] = invoice_documents(client_record)
@@ -433,28 +449,103 @@ async def update_single_invoice(
     if not inv:
         raise HTTPException(status_code=404, detail=f"Facture #{invoice_id} introuvable.")
 
-    # Nettoyage et normalisation des numéros de série si transmis en texte
-    if "serial_numbers" in updates:
-        val_sn = updates["serial_numbers"]
-        if isinstance(val_sn, str):
-            from core.post_corrector import clean_serial_number
-            primary_tokens = [t.strip() for t in re.split(r"[,;\n\r]+", val_sn.strip()) if t.strip()]
-            cleaned_list = []
-            for t in primary_tokens:
-                sub_parts = t.split()
-                if len(sub_parts) > 1 and all(len(p) >= 6 for p in sub_parts):
-                    for p in sub_parts:
-                        c = clean_serial_number(p)
-                        if c:
-                            cleaned_list.append(c)
+    from core.post_corrector import clean_serial_number
+    from storage.database import InvoiceConflict
+
+    updates = dict(updates)
+    expected_revision = updates.pop("expected_revision", None)
+    if expected_revision is not None and (not isinstance(expected_revision, str) or not expected_revision):
+        raise HTTPException(status_code=400, detail="Révision invalide.")
+    if expected_revision is not None and expected_revision != inv["revision"]:
+        raise HTTPException(status_code=409, detail="La facture a été modifiée depuis son ouverture.")
+    corrections = updates.pop("serial_corrections", None)
+    if corrections is not None:
+        if not expected_revision:
+            raise HTTPException(status_code=400, detail="Révision initiale requise pour corriger les numéros.")
+        if "serial_numbers" in updates or "product_items" in updates or not isinstance(corrections, list) or not corrections:
+            raise HTTPException(status_code=400, detail="Corrections de numéros invalides ou contradictoires.")
+        serials = list(inv.get("serial_numbers") or [])
+        items = [dict(item) for item in (inv.get("product_items") or [])]
+        original_count = len(serials)
+        used_serials, used_items = set(), set()
+        for correction in corrections:
+            if not isinstance(correction, dict) or set(correction) != {"serial_index", "item_indices", "value"}:
+                raise HTTPException(status_code=400, detail="Correction de numéro invalide.")
+            index, indices, value = correction["serial_index"], correction["item_indices"], correction["value"]
+            if index is not None and (type(index) is not int or index < 0 or index >= original_count or index in used_serials):
+                raise HTTPException(status_code=400, detail="Index de numéro invalide.")
+            if not isinstance(indices, list) or any(type(i) is not int or i < 0 or i >= len(items) or i in used_items for i in indices) or len(set(indices)) != len(indices):
+                raise HTTPException(status_code=400, detail="Indices de lignes invalides.")
+            if not isinstance(value, str) or not value.strip() or not (cleaned := clean_serial_number(value)):
+                raise HTTPException(status_code=400, detail="Numéro de série invalide.")
+            old = serials[index] if index is not None else None
+            if any((items[i].get("serial_number") or None) != old for i in indices):
+                raise HTTPException(status_code=400, detail="La ligne sélectionnée ne correspond pas au numéro initial.")
+            if old and any(item.get("serial_number") == old for item in items) and not indices:
+                raise HTTPException(status_code=400, detail="Sélectionnez explicitement les lignes à corriger.")
+            if index is not None:
+                used_serials.add(index)
+                serials[index] = cleaned
+            else:
+                serials.append(cleaned)
+            for i in indices:
+                used_items.add(i)
+                items[i]["serial_number"] = cleaned
+            if old and any(item.get("serial_number") == old for item in items) and old not in serials:
+                serials.append(old)
+        updates["serial_numbers"] = serials
+        updates["product_items"] = items
+    elif "serial_numbers" in updates:
+        val = updates["serial_numbers"]
+        if isinstance(val, str):
+            val = [t.strip() for t in re.split(r"[,;\n\r]+", val) if t.strip()]
+        if not isinstance(val, list) or any(not isinstance(t, str) or not t.strip() for t in val):
+            raise HTTPException(status_code=400, detail="Liste de numéros invalide.")
+        cleaned = [clean_serial_number(t) for t in val]
+        if any(not t for t in cleaned):
+            raise HTTPException(status_code=400, detail="Numéro de série invalide.")
+        old = inv.get("serial_numbers") or []
+        if any(item.get("serial_number") and item.get("serial_number") in old and item.get("serial_number") not in cleaned for item in (inv.get("product_items") or [])):
+            raise HTTPException(status_code=400, detail="Sélectionnez explicitement les lignes à corriger.")
+        updates["serial_numbers"] = cleaned
+    if "product_items" in updates and corrections is None:
+        incoming = updates["product_items"]
+        existing = inv.get("product_items") or []
+        if not isinstance(incoming, list) or any(not isinstance(item, dict) for item in incoming):
+            raise HTTPException(status_code=400, detail="Liste de lignes produits invalide.")
+        if incoming != existing:
+            # Sans identifiant de ligne, seule une association unique par numéro ou
+            # nom inchangé permet de fusionner sans perdre les métadonnées cachées.
+            merged, used = [], set()
+            serials = list(updates.get("serial_numbers", inv.get("serial_numbers") or []))
+            for item in incoming:
+                serial = item.get("serial_number") or None
+                name = item.get("product_name") or item.get("designation") or ""
+                if serial is not None:
+                    if not isinstance(serial, str) or not (serial := clean_serial_number(serial)):
+                        raise HTTPException(status_code=400, detail="Numéro de ligne produit invalide.")
+                candidates = [i for i, old in enumerate(existing) if i not in used and serial and old.get("serial_number") == serial]
+                if not candidates:
+                    candidates = [i for i, old in enumerate(existing) if i not in used and name and (old.get("product_name") or old.get("designation") or "") == name]
+                if len(candidates) > 1:
+                    raise HTTPException(status_code=400, detail="Association de ligne produit ambiguë ; utilisez la correction explicite des numéros.")
+                if candidates:
+                    index = candidates[0]
+                    old = existing[index]
+                    if (old.get("serial_number") or None) != serial:
+                        raise HTTPException(status_code=400, detail="Pour modifier le numéro d'une ligne, utilisez la correction explicite.")
+                    used.add(index)
+                    merged.append({**old, **item, "serial_number": serial})
                 else:
-                    c = clean_serial_number(t)
-                    if c:
-                        cleaned_list.append(c)
-            updates["serial_numbers"] = cleaned_list
-        elif isinstance(val_sn, list):
-            from core.post_corrector import clean_serial_number
-            updates["serial_numbers"] = [clean_serial_number(str(tok)) for tok in val_sn if tok]
+                    merged.append({**item, "serial_number": serial})
+                if serial and serial not in serials:
+                    serials.append(serial)
+            if len(used) != len(existing):
+                raise HTTPException(status_code=400, detail="Impossible d'associer ou supprimer une ligne produit sans sélection explicite.")
+            updates["product_items"] = merged
+            updates["serial_numbers"] = serials
+        else:
+            del updates["product_items"]
 
     # Nettoyage et normalisation des noms de produits si transmis
     if "product_names" in updates:
@@ -491,13 +582,21 @@ async def update_single_invoice(
         except Exception:
             pass
 
-    success = db.update_invoice(invoice_id, updates)
+    try:
+        success = db.update_invoice(invoice_id, updates, expected_revision=expected_revision)
+    except InvoiceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not success:
         raise HTTPException(status_code=500, detail="Échec de la mise à jour de la facture.")
 
     # Synchronisation immédiate avec le classeur Excel
-    all_invoices = db.get_all_invoices()
-    warnings = refresh_excel(all_invoices)
+    try:
+        warnings = refresh_excel(db.get_all_invoices())
+    except Exception:
+        logger.exception("Échec de synchronisation Excel après enregistrement.")
+        warnings = ["Données enregistrées ; export Excel non actualisé."]
 
     updated_inv = db.get_invoice_by_id(invoice_id)
     return JSONResponse(

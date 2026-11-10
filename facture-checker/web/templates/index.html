@@ -1887,6 +1887,38 @@
         </div>
     </div>
 
+    <style>
+        .correction-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+        .correction-preview { width:100%; height:65vh; min-height:320px; border:1px solid var(--border-subtle); background:white; }
+        .correction-fields { display:flex; flex-direction:column; gap:12px; }
+        .correction-serial { padding:10px; border:1px solid var(--border-subtle); border-radius:8px; }
+        @media (max-width:750px) { .correction-layout { grid-template-columns:1fr; } .correction-preview { height:40vh; min-height:220px; } }
+    </style>
+    <div id="correctionModal" class="modal-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="correctionTitle">
+        <div class="modal-card" style="width:min(1100px, 96vw); max-width:1100px; max-height:95vh; overflow:auto;">
+            <div class="modal-header"><h2 id="correctionTitle">Vérifier et corriger</h2><button type="button" class="modal-close-btn" onclick="closeCorrection()" aria-label="Fermer">✕</button></div>
+            <p>Comparez les informations avec le document original. Les correspondances proposées restent à vérifier.</p>
+            <div class="correction-layout">
+                <section aria-label="Document original">
+                    <label for="correctionDocument">Document original</label>
+                    <select id="correctionDocument" class="modal-input" onchange="showCorrectionDocument()"></select>
+                    <p id="correctionDocumentMessage" role="status"></p>
+                    <a id="correctionDocumentLink" target="_blank" rel="noopener">Ouvrir le document dans un nouvel onglet</a>
+                    <iframe id="correctionPreview" class="correction-preview" title="Aperçu du document original"></iframe>
+                </section>
+                <form id="correctionForm" class="correction-fields" onsubmit="saveCorrection(event)">
+                    <label for="correctionSupplier">Fournisseur / fabricant</label><input id="correctionSupplier" class="modal-input" type="text">
+                    <label for="correctionPatient">Client / patient</label><input id="correctionPatient" class="modal-input" type="text">
+                    <div><strong>Numéros de série</strong><p>Vérifiez chaque numéro sur la facture. Pour un numéro présent sur plusieurs lignes, choisissez les lignes à modifier.</p><div id="correctionSerials"></div></div>
+                    <p id="correctionMessage" role="status" aria-live="polite"></p>
+                    <button id="correctionSave" type="submit" class="btn-zone-capture btn-vendor">Vérifier les modifications</button>
+                    <button type="button" class="btn-secondary" onclick="openFullEditFromCorrection()">Ouvrir l’édition complète</button>
+                    <button type="button" class="btn-secondary" onclick="closeCorrection()">Annuler</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- MODAL D'ÉDITION INTERACTIVE (HUMAN-IN-THE-LOOP) -->
     <div id="editInvoiceModal" class="modal-overlay" style="display: none;">
         <div class="modal-card">
@@ -2391,7 +2423,19 @@
             }
         }
 
+        function showExtractionPages(container, groups) {
+            let details = container.querySelector('.extraction-pages');
+            if (!details) { details = document.createElement('p'); details.className = 'extraction-pages'; container.appendChild(details); }
+            const parts = [];
+            for (const [label, pages] of groups) {
+                if (!Array.isArray(pages)) continue;
+                for (const page of pages) parts.push(`${label} document ${page.document}, page ${page.page}/${page.total} : ${page.source === 'pdf_text' ? 'texte PDF' : 'OCR'}${page.text_detected ? '' : ' — aucun texte lisible'}`);
+            }
+            details.textContent = parts.join(' · ');
+        }
+
         function renderComparisonResult(data) {
+            showExtractionPages(document.getElementById('compareResultBox'), [['Fournisseur', data.vendor_extraction_pages], ['Client', data.client_extraction_pages]]);
             showArchivedDocuments(document.getElementById('compareResultBox'), [
                 {id: data.vendor_invoice_id, documents: data.vendor_documents, label: 'la facture fournisseur'},
                 {id: data.client_invoice_id, documents: data.client_documents, label: 'la facture client'}
@@ -2717,6 +2761,7 @@
         }
 
         function renderSingleResult(data) {
+            showExtractionPages(document.getElementById('resultBox'), [['', data.extraction_pages]]);
             showArchivedDocuments(document.getElementById('resultBox'), [
                 {id: data.id, documents: data.source_documents, label: 'le document'}
             ]);
@@ -2915,20 +2960,20 @@
                 summary.innerHTML = `
                     <div class="compare-kpi-grid" style="margin-bottom: 14px;">
                         <div class="kpi-mini-card">
-                            <div class="kpi-mini-label">Appareils rapprochés</div>
+                            <div class="kpi-mini-label">Correspondances exactes / probables</div>
                             <div class="kpi-mini-val" style="color: var(--audit-success); font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
-                                ${kpi.rapproches_count} / ${kpi.total_serials_detected} <span style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary);">(${kpi.taux_couverture}%)</span>
+                                ${Number(kpi.exact_count) || 0} / ${Number(kpi.probable_count) || 0}
                             </div>
                         </div>
                         <div class="kpi-mini-card">
                             <div class="kpi-mini-label">Achats en attente</div>
-                            <div class="kpi-mini-val" style="color: ${kpi.non_refactures_count > 0 ? 'var(--audit-error)' : 'var(--audit-success)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
+                            <div class="kpi-mini-val" style="color: ${kpi.pending_purchase_count > 0 ? 'var(--audit-warn)' : 'var(--audit-success)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
                                 ${kpi.pending_purchase_count || 0} élément(s)
                             </div>
                         </div>
                         <div class="kpi-mini-card">
                             <div class="kpi-mini-label">Éléments à vérifier</div>
-                            <div class="kpi-mini-val" style="color: ${kpi.volume_dépenses_orphelines > 0 ? 'var(--audit-warn)' : 'var(--text-primary)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
+                            <div class="kpi-mini-val" style="color: ${kpi.to_review_count > 0 ? 'var(--audit-warn)' : 'var(--text-primary)'}; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
                                 ${kpi.to_review_count || 0} élément(s)
                             </div>
                         </div>
@@ -2958,32 +3003,31 @@
                     const div = document.createElement('div');
                     div.className = "rec-item";
 
-                    let pillClass = "pill-rapproche";
-                    let pillText = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><polyline points="20 6 9 17 4 12"/></svg> Rapproché`;
-                    if (item.status === "NON_REFACTURE") {
-                        pillClass = "pill-non-refacture";
-                        pillText = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Non refacturé`;
-                    } else if (item.status === "ACHAT_NON_TROUVE") {
-                        pillClass = "pill-achat-manquant";
-                        pillText = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:3px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Achat non archivé`;
-                    }
+                    const states = {
+                        RAPPROCHE: ['pill-rapproche', 'Rapproché — numéro exact'],
+                        RAPPROCHE_PROBABLE: ['pill-achat-manquant', 'Correspondance probable — à confirmer'],
+                        ACHAT_EN_ATTENTE: ['pill-achat-manquant', 'Achat en attente de vente'],
+                        A_VERIFIER: ['pill-non-refacture', 'À vérifier']
+                    };
+                    const [pillClass, pillText] = states[item.status] || ['pill-achat-manquant', 'Statut inconnu — à vérifier'];
 
                     div.innerHTML = `
                         <div class="rec-header">
-                            <span class="rec-sn">S/N: ${item.serial_number}</span>
+                            <span class="rec-sn">S/N: ${escapeHtml(item.serial_number || '—')}</span>
                             <span class="rec-pill ${pillClass}">${pillText}</span>
                         </div>
                         <div class="rec-row">
                             <span class="rec-label">Achat Fabricant:</span>
-                            <span>${item.fournisseur_nom} (${item.achat_prix_ttc ? item.achat_prix_ttc.toFixed(2) + ' €' : '-'})</span>
+                            <span>${escapeHtml(item.fournisseur_nom || '—')} (${typeof item.achat_prix_ttc === 'number' ? item.achat_prix_ttc.toFixed(2) + ' €' : '-'})</span>
                         </div>
                         <div class="rec-row">
                             <span class="rec-label">Vente Patient:</span>
-                            <span>${item.patient_nom} (${item.vente_prix_ttc ? item.vente_prix_ttc.toFixed(2) + ' €' : '-'})</span>
+                            <span>${escapeHtml(item.patient_nom || '—')} (${typeof item.vente_prix_ttc === 'number' ? item.vente_prix_ttc.toFixed(2) + ' €' : '-'})</span>
                         </div>
+                        <div class="rec-row"><span class="rec-label">Méthode :</span><span>${escapeHtml(item.match_method || '—')}</span></div>
                         <div class="rec-row" style="margin-top:6px; font-weight:700;">
                             <span class="rec-label">Diagnostic:</span>
-                            <span>${item.diagnostic}</span>
+                            <span>${escapeHtml(item.diagnostic || '—')}</span>
                         </div>
                     `;
                     list.appendChild(div);
@@ -3082,14 +3126,14 @@
                     const serials = Array.isArray(inv.serial_numbers) ? inv.serial_numbers : [];
                     const serialsHtml = serials.length > 0
                         ? `<div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">
-                             ${serials.map(s => `<span style="font-family: var(--font-mono); font-size: 0.72rem; font-variant-numeric: tabular-nums; background: var(--bg-surface-subtle); color: var(--primary); padding: 2px 7px; border-radius: var(--radius-sm); font-weight: 600; border: 1px solid var(--border-subtle);">S/N: ${s}</span>`).join('')}
+                             ${serials.map(s => `<span style="font-family: var(--font-mono); font-size: 0.72rem; font-variant-numeric: tabular-nums; background: var(--bg-surface-subtle); color: var(--primary); padding: 2px 7px; border-radius: var(--radius-sm); font-weight: 600; border: 1px solid var(--border-subtle);">S/N: ${escapeHtml(s)}</span>`).join('')}
                            </div>`
                         : '';
 
                     const prods = Array.isArray(inv.product_names) ? inv.product_names : [];
                     const productsHtml = prods.length > 0
                         ? `<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">
-                             ${prods.map(p => `<span style="font-size: 0.72rem; background: rgba(30, 77, 61, 0.08); color: var(--brand-forest); padding: 2px 8px; border-radius: var(--radius-sm); font-weight: 600; border: 1px solid rgba(30, 77, 61, 0.22);"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>${p}</span>`).join('')}
+                             ${prods.map(p => `<span style="font-size: 0.72rem; background: rgba(30, 77, 61, 0.08); color: var(--brand-forest); padding: 2px 8px; border-radius: var(--radius-sm); font-weight: 600; border: 1px solid rgba(30, 77, 61, 0.22);"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>${escapeHtml(p)}</span>`).join('')}
                            </div>`
                         : '';
 
@@ -3099,13 +3143,13 @@
                                 <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 4px;">
                                     <span class="zone-badge ${typeClass}">${typeLabel}</span>
                                     <span class="mini-status ${statusClass}">${statusText}</span>
-                                    <span style="font-size: 0.75rem; color: var(--text-secondary); font-variant-numeric: tabular-nums;">${dateFact}</span>
+                                    <span style="font-size: 0.75rem; color: var(--text-secondary); font-variant-numeric: tabular-nums;">${escapeHtml(dateFact)}</span>
                                 </div>
                                 <div style="font-weight: 700; font-size: 0.98rem; color: var(--text-primary); margin-bottom: 2px;">
-                                    ${numFact} <span style="font-weight: 400; color: var(--text-secondary); font-size: 0.88rem;">• ${tiers}</span>
+                                    ${escapeHtml(numFact)} <span style="font-weight: 400; color: var(--text-secondary); font-size: 0.88rem;">• ${escapeHtml(tiers)}</span>
                                 </div>
                                 <div style="font-size: 0.85rem; color: var(--text-secondary); font-variant-numeric: tabular-nums;">
-                                    TTC : <b style="color: var(--primary); font-size: 0.92rem;">${ttc}</b> <span style="color: var(--text-tertiary); font-size:0.8rem;">(HT: ${ht})</span>
+                                    TTC : <b style="color: var(--primary); font-size: 0.92rem;">${escapeHtml(ttc)}</b> <span style="color: var(--text-tertiary); font-size:0.8rem;">(HT: ${escapeHtml(ht)})</span>
                                 </div>
                                 ${serialsHtml}
                                 ${productsHtml}
@@ -3115,10 +3159,11 @@
                                 </div>
                             </div>
                             <div style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;">
+                                <button type="button" class="btn-secondary" onclick="openCorrection(${Number(inv.id)})">Vérifier et corriger</button>
                                 <button type="button" class="btn-secondary" style="padding: 6px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px;" onclick="openEditModal(${inv.id})" title="Modifier cette facture">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Modifier
                                 </button>
-                                <button type="button" class="btn-danger btn-danger-outline btn-danger-sm" style="display: inline-flex; align-items: center; gap: 4px;" onclick="deleteSingleInvoice(${inv.id}, '${numFact}')" title="Supprimer cette facture">
+                                <button type="button" class="btn-danger btn-danger-outline btn-danger-sm" style="display: inline-flex; align-items: center; gap: 4px;" onclick="deleteSingleInvoice(${Number(inv.id)}, this.dataset.label)" data-label="${escapeHtml(numFact)}" title="Supprimer cette facture">
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Supprimer
                                 </button>
                             </div>
@@ -3128,8 +3173,144 @@
         }
 
         // ==========================================
+        let correctionInvoice = null;
+        let correctionReturnFocus = null;
+        let correctionBusy = false;
+        let correctionDirty = false;
+        let correctionPreviewRequest = 0;
+
+        async function openCorrection(invoiceId) {
+            try {
+                const [response, listResponse] = await Promise.all([fetch(`/api/invoices/${invoiceId}`), fetch('/api/invoices')]);
+                const inv = await readApiResponse(response, 'Facture introuvable.');
+                const invoices = await readApiResponse(listResponse, 'Registre indisponible.');
+                correctionInvoice = inv;
+                correctionInvoice.source_documents = (invoices.find(item => item.id === inv.id) || {}).source_documents || [];
+                correctionReturnFocus = document.activeElement;
+                correctionDirty = false;
+                document.querySelectorAll('#correctionForm input').forEach(input => { input.disabled = false; });
+                document.getElementById('correctionSave').disabled = false;
+                document.getElementById('correctionSave').textContent = 'Vérifier les modifications';
+                document.getElementById('correctionSupplier').value = inv.fournisseur_nom || '';
+                document.getElementById('correctionPatient').value = inv.patient_nom || '';
+                document.getElementById('correctionMessage').textContent = '';
+                const serials = Array.isArray(inv.serial_numbers) ? inv.serial_numbers : [];
+                const items = Array.isArray(inv.product_items) ? inv.product_items : [];
+                const container = document.getElementById('correctionSerials');
+                container.innerHTML = '';
+                serials.forEach((serial, index) => {
+                    const matching = items.map((item, i) => ({item, i})).filter(({item}) => item.serial_number === serial);
+                    const block = document.createElement('div');
+                    block.className = 'correction-serial';
+                    block.innerHTML = `<label for="correctionSerial${index}">Numéro de série ${index + 1}</label><input id="correctionSerial${index}" class="modal-input correction-serial-input" data-index="${index}" type="text" value="${escapeHtml(serial)}">` +
+                        (matching.length ? `<fieldset><legend>Lignes associées à modifier</legend>${matching.map(({item, i}) => `<label style="display:block"><input type="checkbox" data-item="${i}" ${matching.length === 1 ? 'checked' : ''}> ${escapeHtml(item.product_name || item.designation || 'Ligne ' + (i + 1))} ${item.reference ? '— ' + escapeHtml(item.reference) : ''}</label>`).join('')}</fieldset>` : '<small>Aucune ligne produit associée.</small>');
+                    container.appendChild(block);
+                });
+                if (!serials.length) container.textContent = 'Aucun numéro de série enregistré.';
+                const select = document.getElementById('correctionDocument');
+                select.innerHTML = correctionInvoice.source_documents.map((doc, index) => `<option value="${index}">${escapeHtml(doc.original_name || doc.filename || 'Document ' + (index + 1))}</option>`).join('');
+                document.getElementById('correctionModal').style.display = 'flex';
+                showCorrectionDocument();
+                document.getElementById('correctionSupplier').focus();
+            } catch (err) { alert('Impossible d’ouvrir la correction : ' + err.message); }
+        }
+
+        async function showCorrectionDocument() {
+            const request = ++correctionPreviewRequest;
+            const iframe = document.getElementById('correctionPreview');
+            const link = document.getElementById('correctionDocumentLink');
+            const message = document.getElementById('correctionDocumentMessage');
+            iframe.removeAttribute('src');
+            iframe.style.display = 'none';
+            link.style.display = 'none';
+            if (!correctionInvoice || !correctionInvoice.source_documents.length) { message.textContent = 'Aucun document original disponible. Vous pouvez corriger sans aperçu.'; return; }
+            const url = `/api/invoices/${correctionInvoice.id}/documents/${document.getElementById('correctionDocument').value}`;
+            message.textContent = 'Chargement du document…';
+            try {
+                const response = await fetch(url);
+                if (response.body) response.body.cancel();
+                if (!response.ok) throw new Error('Document indisponible');
+                if (request !== correctionPreviewRequest) return;
+                iframe.src = url; iframe.style.display = 'block'; link.href = url; link.style.display = 'inline';
+                message.textContent = 'Si l’aperçu ne s’affiche pas, ouvrez le document dans un nouvel onglet.';
+            } catch (err) { if (request === correctionPreviewRequest) message.textContent = 'Document original indisponible. Vous pouvez corriger sans aperçu.'; }
+        }
+
+        function closeCorrection(force = false) {
+            if (correctionBusy) return;
+            if (!force && correctionDirty && !confirm('Abandonner les modifications non enregistrées ?')) return;
+            correctionPreviewRequest++;
+            document.getElementById('correctionPreview').removeAttribute('src');
+            document.getElementById('correctionModal').style.display = 'none';
+            correctionInvoice = null;
+            if (correctionReturnFocus) correctionReturnFocus.focus();
+        }
+
+        function openFullEditFromCorrection() {
+            const id = correctionInvoice && correctionInvoice.id;
+            if (!id || (correctionDirty && !confirm('Abandonner les modifications non enregistrées ?'))) return;
+            closeCorrection(true); openEditModal(id);
+        }
+
+        document.getElementById('correctionForm').addEventListener('input', () => { correctionDirty = true; });
+        document.getElementById('correctionModal').addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); closeCorrection(); }
+            if (event.key !== 'Tab') return;
+            const controls = [...document.querySelectorAll('#correctionModal button:not([disabled]), #correctionModal input:not([disabled]), #correctionModal select:not([disabled]), #correctionModal a[href]')].filter(element => element.offsetParent !== null);
+            if (!controls.length) return;
+            if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls[controls.length - 1].focus(); }
+            else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) { event.preventDefault(); controls[0].focus(); }
+        });
+
+        async function saveCorrection(event) {
+            event.preventDefault();
+            if (!correctionInvoice || correctionBusy) return;
+            const inv = correctionInvoice;
+            const payload = {expected_revision: inv.revision};
+            const changes = [];
+            for (const [field, id, label] of [['fournisseur_nom', 'correctionSupplier', 'Fournisseur'], ['patient_nom', 'correctionPatient', 'Patient']]) {
+                const value = document.getElementById(id).value.trim();
+                if (value !== (inv[field] || '')) { payload[field] = value; changes.push(`${label} : ${inv[field] || '—'} → ${value || '—'}`); }
+            }
+            const corrections = [];
+            for (const input of document.querySelectorAll('.correction-serial-input')) {
+                const index = Number(input.dataset.index);
+                const value = input.value.trim();
+                if (value === inv.serial_numbers[index]) continue;
+                if (!value) { document.getElementById('correctionMessage').textContent = 'La suppression de numéro n’est pas disponible dans cet assistant.'; return; }
+                const checks = [...input.closest('.correction-serial').querySelectorAll('input[data-item]')];
+                if (checks.length && !checks.some(check => check.checked)) { document.getElementById('correctionMessage').textContent = 'Sélectionnez les lignes associées à modifier pour chaque numéro corrigé.'; return; }
+                corrections.push({serial_index: index, item_indices: checks.filter(check => check.checked).map(check => Number(check.dataset.item)), value});
+                changes.push(`S/N : ${inv.serial_numbers[index]} → ${value || '(supprimé)'}`);
+            }
+            if (corrections.length) payload.serial_corrections = corrections;
+            if (!changes.length) { document.getElementById('correctionMessage').textContent = 'Aucune modification à enregistrer.'; return; }
+            if (!confirm('Confirmer ces modifications ?\n\n' + changes.join('\n') + '\n\nLes numéros peuvent être normalisés à l’enregistrement ; vérifiez la valeur affichée après sauvegarde.')) return;
+            correctionBusy = true;
+            const button = document.getElementById('correctionSave'); button.disabled = true;
+            try {
+                const response = await fetch(`/api/invoices/${inv.id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+                const data = await readApiResponse(response, 'Échec de la mise à jour.');
+                correctionInvoice = {...data.invoice, source_documents: inv.source_documents};
+                correctionDirty = false;
+                const saved = correctionInvoice;
+                document.getElementById('correctionMessage').textContent = `Enregistré. Fournisseur : ${saved.fournisseur_nom || '—'} ; patient : ${saved.patient_nom || '—'} ; S/N : ${(saved.serial_numbers || []).join(', ') || '—'}. État de la facture : ${saved.status || 'à vérifier'}. ${saved.error_details || ''} ${(data.warnings || []).join(' ')}`;
+                await Promise.all([loadInvoicesList(), loadReconciliationData()]);
+                const matches = (reconciliationItems || []).filter(item => item.achat_invoice_id === inv.id || item.vente_invoice_id === inv.id);
+                const result = matches.length ? matches.map(item => `${item.match_method || 'À vérifier'} : ${item.diagnostic || ''}`).join(' ; ') : 'Aucun rapprochement disponible.';
+                document.getElementById('correctionMessage').textContent += ` Rapprochement actualisé : ${result}`;
+                // Recharger les champs et leurs associations avant une nouvelle correction.
+                document.querySelectorAll('#correctionForm input').forEach(input => { input.disabled = true; });
+                button.disabled = true;
+                button.textContent = 'Fermez puis rouvrez pour une autre correction';
+            } catch (err) { document.getElementById('correctionMessage').textContent = 'Enregistrement impossible : ' + err.message; }
+            finally { correctionBusy = false; button.disabled = !correctionDirty && !!correctionInvoice && button.textContent.startsWith('Fermez'); }
+        }
+
         // GESTION DU MODAL D'ÉDITION INTERACTIVE
         // ==========================================
+        let fullEditInitial = null;
+        let fullEditRevision = null;
         async function openEditModal(invoiceId) {
             try {
                 const res = await fetch(`/api/invoices/${invoiceId}`);
@@ -3158,9 +3339,11 @@
                 const invoicesResponse = await fetch('/api/invoices');
                 const allInvoices = invoicesResponse.ok ? await invoicesResponse.json() : [];
                 const relatedSelect = document.getElementById('editRelatedInvoiceId');
-                relatedSelect.innerHTML = '<option value="">Aucune / non rattachée</option>' + allInvoices.filter(other => other.id !== inv.id).map(other => `<option value="${other.id}">#${other.id} · ${other.numero_facture || 'Sans numéro'}</option>`).join('');
+                relatedSelect.innerHTML = '<option value="">Aucune / non rattachée</option>' + allInvoices.filter(other => other.id !== inv.id).map(other => `<option value="${other.id}">#${other.id} · ${escapeHtml(other.numero_facture || 'Sans numéro')}</option>`).join('');
                 relatedSelect.value = inv.related_invoice_id || '';
 
+                fullEditRevision = inv.revision;
+                fullEditInitial = Object.fromEntries([...document.querySelectorAll('#editInvoiceForm input, #editInvoiceForm select, #editInvoiceForm textarea')].map(el => [el.id, el.value]));
                 document.getElementById('editInvoiceModal').style.display = 'flex';
             } catch (err) {
                 alert("Erreur lors de l'ouverture de l'édition : " + err.message);
@@ -3209,6 +3392,10 @@
                 product_items: parseProductItems(document.getElementById('editProductItems').value),
             };
 
+            const fields = {invoice_type:'editInvoiceType', document_type:'editDocumentType', related_invoice_id:'editRelatedInvoiceId', numero_facture:'editNumFacture', date_facture:'editDateFacture', fournisseur_nom:'editFournisseur', patient_nom:'editPatient', montant_ht:'editMontantHt', montant_tva:'editMontantTva', montant_ttc:'editMontantTtc', serial_numbers:'editSerialNumbers', product_names:'editProductNames', product_items:'editProductItems'};
+            Object.keys(payload).forEach(key => { if (fullEditInitial && document.getElementById(fields[key]).value === fullEditInitial[fields[key]]) delete payload[key]; });
+            if (!Object.keys(payload).length) { closeEditModal(); return; }
+            payload.expected_revision = fullEditRevision;
             try {
                 const res = await fetch(`/api/invoices/${id}`, {
                     method: 'PUT',

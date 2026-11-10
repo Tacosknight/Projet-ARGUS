@@ -14,10 +14,10 @@
 
 Dans le secteur de l'audioprothèse, la gestion administrative repose sur un double flux documentaire : les **factures d'achats fabricants** (Phonak, Oticon, Signia, Widex, Starkey, GN ReSound, etc.) et les **factures de vente patients**. L'absence de réconciliation systématique engendre des pertes de marge, des oublis de refacturation d'appareils et des anomalies comptables.
 
-**ARGUS** automatise intégralement cette chaîne de contrôle :
+**ARGUS** aide à automatiser cette chaîne de contrôle ; les résultats doivent être vérifiés :
 - **Audit comptable et légal** : Contrôle automatique du SIRET (Luhn), de la TVA intracommunautaire, de l'équilibre fiscal (HT + TVA = TTC) et détection des doublons.
-- **Rapprochement bilatéral par Numéro de Série (S/N)** : Appariement automatique entre les appareils achetés aux fabricants et les appareils facturés aux patients, avec calcul instantané des marges brutes.
-- **Traitement 100% local** : Aucune donnée médicale ou financière ne transite par le cloud. Fonctionne en circuit fermé pour une conformité totale au RGPD et au secret médical.
+- **Rapprochement bilatéral par Numéro de Série (S/N)** : propositions de correspondance entre achats et ventes ; les correspondances approximatives nécessitent une vérification humaine. L'écart TTC n'est disponible que si les deux prix unitaires sont connus et ne constitue pas à lui seul une marge comptable.
+- **Traitement local** : les documents et résultats restent sur l'installation locale, mais cette caractéristique ne garantit pas à elle seule la conformité RGPD ou le secret médical.
 
 > [!NOTE]
 > ARGUS n'utilise aucun modèle d'IA générative opaque (LLM). L'ensemble des décisions, calculs et extractions repose sur des règles déterministes, une géométrie cartésienne 2D et des algorithmes arithmétiques vérifiables.
@@ -29,6 +29,7 @@ Dans le secteur de l'audioprothèse, la gestion administrative repose sur un dou
 - **Ingestion Multiformat & Multi-pages** :
   - Prise en charge des photographies smartphone (JPG, PNG) et des documents PDF (vectoriels et numérisés multi-pages).
   - Découpage automatique des pages PDF et consolidation sous forme d'une pièce comptable unique.
+- **Lecture PDF hybride** : pour chaque page, ARGUS utilise directement le texte et ses coordonnées lorsque la couche PDF paraît exploitable ; sinon il utilise automatiquement l'OCR local. Les PDF scannés et les documents mêlant pages numériques et scannées restent pris en charge. Les contrôles ne garantissent pas la détection de toutes les couches incomplètes : vérifier les noms, montants et numéros sur l'original. Les résultats de traitement indiquent la méthode utilisée par page ; ces indications ne sont pas conservées dans l'historique.
 - **Vision par Ordinateur & OCR Spatial 2D** :
   - Détection automatique des 4 sommets et redressement géométrique par homographie.
   - Binarisation adaptative supprimant les ombres et reflets de prise de vue.
@@ -49,7 +50,10 @@ Dans le secteur de l'audioprothèse, la gestion administrative repose sur un dou
   - Script Windows dédié au traitement batch avec ouverture automatique du classeur Excel.
   - Affichage d'un QR Code dans le terminal pour connexion smartphone instantanée en Wi-Fi.
   - Déclenchement de la caméra mobile pour numériser directement les factures au comptoir.
-  - Registre interactif avec modale d'édition manuelle des champs détectés.
+  - Registre interactif avec assistant « Vérifier et corriger » : comparer l'original aux noms et numéros de série, sélectionner les lignes concernées et vérifier le résultat après enregistrement. L'édition complète reste accessible.
+
+> [!WARNING]
+> Le mode mobile expose le serveur sur le réseau local sans authentification ni chiffrement du transport. Réservez-le à un réseau de confiance, ne l'exposez pas sur Internet et protégez l'accès aux appareils et sauvegardes. Un accès partagé ou distant nécessite une sécurisation supplémentaire.
 - **Export Managérial Excel & Base SQLite** :
   - Génération dynamique d'un classeur multi-onglets (Tableau de bord KPIs, Audit des prothèses S/N, Détail des factures avec mise en forme conditionnelle).
   - Base SQLite locale persistante avec indexation optimisée.

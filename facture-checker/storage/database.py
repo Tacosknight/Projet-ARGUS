@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import json
+import hashlib
 import logging
 import sqlite3
 from contextlib import closing
@@ -17,6 +18,15 @@ import pandas as pd
 logger = logging.getLogger("FactureChecker.Database")
 
 DEFAULT_DB_PATH = "invoices.db"
+
+
+class InvoiceConflict(ValueError):
+    """Modification concurrente ou collision d'empreinte."""
+
+
+def invoice_revision(row: Dict[str, Any]) -> str:
+    payload = {k: v for k, v in dict(row).items() if k != "revision"}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 class InvoiceDatabase:
@@ -306,6 +316,7 @@ class InvoiceDatabase:
             if not row:
                 return None
             item = dict(row)
+            item["revision"] = invoice_revision(item)
             item["source_documents"] = json.loads(item.get("source_documents") or "[]")
             if item.get("serial_numbers"):
                 try:
@@ -324,58 +335,58 @@ class InvoiceDatabase:
                     item["product_items"] = []
             return item
 
-    def update_invoice(self, invoice_id: int, updates: Dict[str, Any]) -> bool:
-        """
-        Met à jour les champs modifiables d'une facture par son ID.
-        Permet l'édition manuelle Human-in-the-Loop depuis l'interface mobile / web.
-        """
-        allowed_fields = [
-            "numero_facture",
-            "date_facture",
-            "montant_ht",
-            "montant_tva",
-            "montant_ttc",
-            "fournisseur_nom",
-            "patient_nom",
-            "invoice_type",
-            "document_type",
-            "related_invoice_id",
-            "serial_numbers",
-            "product_names",
-            "product_items",
-            "status",
-            "error_details",
-        ]
+    def update_invoice(self, invoice_id: int, updates: Dict[str, Any], expected_revision: Optional[str] = None) -> bool:
+        """Fusionne, revalide et enregistre dans une seule transaction SQLite."""
+        from core.validator import InvoiceValidator
+        import math
 
-        set_clauses = []
-        values = []
-
-        for key, val in updates.items():
-            if key not in allowed_fields:
-                continue
-
-            if key in ["serial_numbers", "error_details", "product_names", "product_items"] and isinstance(val, (list, dict)):
-                val = json.dumps(val, ensure_ascii=False)
-            elif key in ["montant_ht", "montant_tva", "montant_ttc"] and val is not None:
-                try:
-                    val = float(str(val).replace(",", ".").replace("€", "").strip())
-                except (ValueError, TypeError):
-                    pass
-
-            set_clauses.append(f"{key} = ?")
-            values.append(val)
-
-        if not set_clauses:
-            return False
-
-        values.append(invoice_id)
-        query = f"UPDATE invoices SET {', '.join(set_clauses)} WHERE id = ?;"
-
-        with DATA_LOCK, closing(self.get_connection()) as conn, conn:
-            cursor = conn.cursor()
-            cursor.execute(query, tuple(values))
-            conn.commit()
-            return cursor.rowcount > 0
+        allowed = {"numero_facture", "date_facture", "montant_ht", "montant_tva", "montant_ttc",
+                   "fournisseur_nom", "patient_nom", "invoice_type", "document_type", "related_invoice_id",
+                   "serial_numbers", "product_names", "product_items", "siret", "siren", "tva_intracommunautaire"}
+        if not updates or set(updates) - allowed:
+            raise ValueError("Champs de mise à jour invalides.")
+        with DATA_LOCK, closing(self.get_connection()) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+            if row is None:
+                return False
+            current = dict(row)
+            if expected_revision is not None and invoice_revision(current) != expected_revision:
+                raise InvoiceConflict("La facture a été modifiée depuis son ouverture.")
+            merged = dict(current)
+            merged.update(updates)
+            for key in ("montant_ht", "montant_tva", "montant_ttc"):
+                if merged[key] is not None:
+                    try:
+                        merged[key] = float(str(merged[key]).replace(",", ".").replace("€", "").strip())
+                        if not math.isfinite(merged[key]):
+                            raise ValueError()
+                    except (ValueError, TypeError):
+                        raise ValueError(f"Montant invalide : {key}.")
+            def duplicate(value):
+                return conn.execute("SELECT 1 FROM invoices WHERE id != ? AND (unique_hash = ? OR substr(unique_hash, 1, ?) = ?) LIMIT 1",
+                                    (invoice_id, value, len(value) + 5, value + "_dup_")).fetchone() is not None
+            status, errors, new_hash = InvoiceValidator(db_is_duplicate_fn=duplicate).validate(merged)
+            hash_fields = ("siret", "siren", "date_facture", "numero_facture", "montant_ttc")
+            changed_hash = any(merged[k] != current[k] for k in hash_fields)
+            if changed_hash and duplicate(new_hash):
+                raise InvoiceConflict("Une autre facture possède cette empreinte métier.")
+            # Les doublons historiques utilisent un suffixe : le conserver hors changement d'empreinte.
+            stored_hash = new_hash if changed_hash else current["unique_hash"]
+            changes = dict(updates, status=status, error_details=errors, unique_hash=stored_hash)
+            for key in ("montant_ht", "montant_tva", "montant_ttc"):
+                if key in changes:
+                    changes[key] = merged[key]
+            for key in ("serial_numbers", "product_names", "product_items", "error_details"):
+                if key in changes:
+                    changes[key] = json.dumps(changes[key], ensure_ascii=False)
+            try:
+                conn.execute("UPDATE invoices SET " + ", ".join(f"{key} = ?" for key in changes) + " WHERE id = ?",
+                             (*changes.values(), invoice_id))
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                raise InvoiceConflict("Collision d'empreinte métier.") from exc
+            return True
 
     def delete_invoice(self, invoice_id: int) -> bool:
         """Supprime une facture de la base par son ID."""
