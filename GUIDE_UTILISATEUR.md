@@ -1,4 +1,4 @@
-# Guide utilisateur ARGUS 2.4.0
+# Guide utilisateur ARGUS 2.5.1
 
 **Pour les assistants et assistantes en audioprothèse — utilisation sur Windows**
 
@@ -6,7 +6,7 @@ ARGUS aide à lire les factures et à retrouver les appareils achetés et vendus
 
 > **Important :** ARGUS est une aide au contrôle. Même si un résultat paraît conforme, vérifiez les noms, les montants et les numéros de série sur les documents d’origine. Une correspondance « probable » doit être vérifiée : elle n’est pas une confirmation.
 >
-> Ce guide décrit la version **2.4.0**, actuellement préparée en brouillon. Demandez l’archive au responsable de votre centre ou de l’informatique.
+> Ce guide décrit la version **2.5.1**. Demandez l’archive au responsable de votre centre ou de l’informatique.
 
 ## Sommaire
 
@@ -25,7 +25,7 @@ ARGUS aide à lire les factures et à retrouver les appareils achetés et vendus
 
 L’installation consiste à extraire le dossier du programme : il n’est pas nécessaire d’installer Python.
 
-1. Obtenez l’archive Windows `ARGUS-v2.4.0-Windows.zip` auprès de votre responsable.
+1. Obtenez l’archive Windows `ARGUS-v2.5.1-Windows.zip` auprès de votre responsable.
 2. Dans l’Explorateur Windows, faites un clic droit sur le fichier ZIP et choisissez **Extraire tout**.
 3. Choisissez un emplacement facile à retrouver, par exemple le dossier **Documents**, puis confirmez l’extraction.
 4. Ouvrez le dossier extrait jusqu’à voir `ARGUS.exe`.

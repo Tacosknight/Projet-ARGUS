@@ -8,6 +8,7 @@ app = root / "facture-checker"
 
 datas = [
     (str(app / "web" / "templates"), "web/templates"),
+    (str(app / "web" / "static"), "web/static"),
     (os.environ.get("ARGUS_BUILD_MODELS_DIR", str(root / "models")), "models"),
 ]
 binaries = []
@@ -39,6 +40,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="ARGUS",
+    icon=str(app / "web" / "static" / "argus.ico"),
     console=False,
     disable_windowed_traceback=False,
 )

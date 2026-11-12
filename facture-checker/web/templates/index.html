@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="ARGUS contrôle et rapproche localement les factures d'audioprothèse.">
     <title>ARGUS • Contrôle & Rapprochement de Factures</title>
+    <link rel="icon" href="/static/argus.ico" sizes="any">
     <style>
         :root {
             /* ── Surfaces & Fond Minéral Chaleureux (Blanc Cassé Intégral) ── */
@@ -131,6 +132,13 @@
             align-items: baseline;
             gap: 10px;
             flex-wrap: wrap;
+        }
+
+        .brand-image {
+            width: 48px;
+            height: auto;
+            align-self: center;
+            flex: none;
         }
 
         .brand-logomark {
@@ -1438,6 +1446,7 @@
     <header class="masthead">
         <div class="masthead-brand">
             <div class="brand-title-wrap">
+                <img class="brand-image" src="/static/logo.png" alt="" width="48" height="25">
                 <span class="brand-logomark">ARGUS</span>
                 <span class="brand-dot"></span>
                 <span class="brand-domain">Contrôle & Rapprochement de Factures</span>

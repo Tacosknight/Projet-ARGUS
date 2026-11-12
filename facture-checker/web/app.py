@@ -25,6 +25,7 @@ from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, Reques
 from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 import cv2
 import numpy as np
 
@@ -61,8 +62,10 @@ logger = logging.getLogger("FactureChecker.Web")
 app = FastAPI(
     title="Facture-Checker Mobile",
     description="Scanner et auditeur de factures d'aides auditives avec rapprochement S/N.",
-    version="2.5.0",
+    version="2.5.1",
 )
+
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
