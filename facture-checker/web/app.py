@@ -39,7 +39,7 @@ from core.preprocessor import preprocess_image
 from core.ocr_engine import OCREngine
 from core.parser import parse_invoice
 from core.validator import InvoiceValidator
-from core.reconciliation import reconcile_invoices
+from core.reconciliation import reconcile_invoices, grouped_client_totals
 from core.comparator import compare_invoices
 from core.multipage import consolidate_pages, are_pages_of_same_invoice
 from core.app_paths import (
@@ -62,7 +62,7 @@ logger = logging.getLogger("FactureChecker.Web")
 app = FastAPI(
     title="Facture-Checker Mobile",
     description="Scanner et auditeur de factures d'aides auditives avec rapprochement S/N.",
-    version="2.5.1",
+    version="2.6.0",
 )
 
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
@@ -432,6 +432,7 @@ async def compare_grouped(request: Request) -> JSONResponse:
     warnings = refresh_excel(db.get_all_invoices()) if records else []
     return JSONResponse({"complete": complete, "groups": results,
                          "reconciliation": reconcile_invoices(records) if complete else None,
+                         "totaux_clients": grouped_client_totals(records) if complete else None,
                          "warnings": warnings})
 
 

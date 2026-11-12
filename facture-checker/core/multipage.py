@@ -195,7 +195,17 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
     montant_tva = None
     montant_ttc = None
 
-    for p in reversed(sorted_pages):
+    # Sans provenance fiable des montants, des TTC différents peuvent être
+    # des sous-totaux. Ne pas présenter l'un d'eux comme total documentaire.
+    if invoice_type.upper() == "CLIENT":
+        amounts = [p.get("montant_ttc") for p in sorted_pages if p.get("montant_ttc") is not None]
+        if amounts and all(amount == amounts[0] for amount in amounts):
+            p = next(p for p in reversed(sorted_pages) if p.get("montant_ttc") is not None)
+            montant_ht = p.get("montant_ht")
+            montant_tva = p.get("montant_tva")
+            montant_ttc = p["montant_ttc"]
+
+    for p in reversed(sorted_pages) if invoice_type.upper() != "CLIENT" else []:
         p_ttc = p.get("montant_ttc")
         p_ht = p.get("montant_ht")
         if p_ttc is not None and p_ht is not None and p_ttc >= 100.0:
@@ -207,7 +217,7 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             break
 
     # Si aucun total global certifié suffisant n'est trouvé, sommer les montants des pages
-    if montant_ttc is None or montant_ttc < 100.0:
+    if invoice_type.upper() != "CLIENT" and (montant_ttc is None or montant_ttc < 100.0):
         sub_ht = sum((p.get("montant_ht") or 0.0) for p in sorted_pages if (p.get("montant_ht") or 0.0) >= 10.0)
         sub_tva = sum((p.get("montant_tva") or 0.0) for p in sorted_pages)
         if sub_ht > 0:

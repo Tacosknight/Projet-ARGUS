@@ -43,15 +43,37 @@ assert.deepEqual(suggestions(context.filterInvoices(invoices, '', 'autre'), ['nu
 assert.deepEqual(suggestions(items, ['serial_number', 'patient_nom', 'achat_num_facture'], ''), ['Alice', 'FAC-9', 'SN123', 'SN456']);
 assert.deepEqual(suggestions(context.filterReconciliation(items, '', 'autre', 'original'), ['patient_nom', 'serial_number'], ''), ['Alice', 'SN456']);
 const malicious = '<img src=x onerror=alert(1)>';
-const list = { replaceChildren(...options) { this.options = options; } };
-context.document = { getElementById: () => list, createElement: () => ({}) };
-context.updateSearchSuggestions('test', [malicious]);
-assert.equal(list.options[0].value, malicious);
-assert.equal(list.options[0].innerHTML, undefined);
+const attrs = { 'aria-controls': 'test' };
+const input = { value: '', getAttribute: k => attrs[k], setAttribute: (k, v) => { attrs[k] = v; }, removeAttribute: k => { delete attrs[k]; }, dispatchEvent() { context.updateSearchSuggestions('test', []); } };
+const list = { hidden: true, children: [], replaceChildren(...options) { this.children = options; } };
+context.document = { activeElement: input, getElementById: () => list, querySelector: () => input, createElement: () => ({ setAttribute(k, v) { this[k] = v; }, addEventListener(k, fn) { this[k] = fn; }, scrollIntoView() {} }) };
+context.Event = class { constructor(type) { this.type = type; } };
+context.updateSearchSuggestions('test', [malicious, 'Écoute']);
+assert.equal(list.children[0].textContent, malicious);
+assert.equal(list.children[0].innerHTML, undefined);
+assert.equal(attrs['aria-expanded'], 'true');
+const key = key => { let prevented = false; context.searchSuggestionKeydown({ key, currentTarget: input, preventDefault() { prevented = true; } }); return prevented; };
+assert.equal(key('ArrowDown'), true);
+assert.equal(attrs['aria-activedescendant'], 'test-option-0');
+assert.equal(key('ArrowDown'), true);
+assert.equal(attrs['aria-activedescendant'], 'test-option-1');
+assert.equal(key('Enter'), true);
+assert.equal(input.value, 'Écoute');
+assert.equal(attrs['aria-expanded'], 'false');
+context.updateSearchSuggestions('test', ['Écoute']);
+assert.equal(key('Escape'), true);
+assert.equal(list.hidden, true);
+assert.equal(key('ArrowUp'), true);
+assert.equal(attrs['aria-activedescendant'], 'test-option-0');
+context.closeSearchSuggestions(input);
+assert.equal(attrs['aria-expanded'], 'false');
 context.updateSearchSuggestions('test', []);
-assert.equal(list.options.length, 0);
-for (const [input, datalist] of [['invoiceNumberSearch', 'invoiceNumberSuggestions'], ['invoiceSupplierSearch', 'invoiceSupplierSuggestions'], ['recSearch', 'recSuggestions'], ['recSupplierSearch', 'recSupplierSuggestions']]) {
-    assert.match(html, new RegExp(`<input id="${input}"[^>]*list="${datalist}"`));
-    assert.match(html, new RegExp(`<datalist id="${datalist}"></datalist>`));
+assert.equal(list.children.length, 0);
+for (const [field, listId] of [['invoiceNumberSearch', 'invoiceNumberSuggestions'], ['invoiceSupplierSearch', 'invoiceSupplierSuggestions'], ['recSearch', 'recSuggestions'], ['recSupplierSearch', 'recSupplierSuggestions']]) {
+    assert.match(html, new RegExp(`<input id="${field}"[^>]*role="combobox"[^>]*aria-controls="${listId}"`));
+    assert.match(html, new RegExp(`<div id="${listId}"[^>]*role="listbox" hidden>`));
 }
+assert.deepEqual(suggestions(context.filterInvoices(invoices, 'b-', ''), ['fournisseur_nom'], 'ecou'), ['ECOUTE']);
+assert.deepEqual(suggestions(context.filterReconciliation(items, 'sn456', '', 'original'), ['fournisseur_nom'], ''), ['Autre']);
+assert.deepEqual(suggestions(items, ['fournisseur_nom'], 'ecou'), ['Écoute']);
 console.log('Tests de recherche et de tri réussis.');

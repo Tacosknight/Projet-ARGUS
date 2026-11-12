@@ -480,6 +480,44 @@ class InvoiceParser:
         numéros de facture/commande/client, SIRET/SIREN.
         """
         serials_found: Set[str] = set()
+
+        # Les références et montants des frais ne sont pas des S/N. Filtrer leurs
+        # occurrences, pas leurs valeurs : un même identifiant peut aussi être
+        # un véritable S/N ailleurs sur la facture.
+        fee_label = re.compile(
+            r"\b(?:transport|frais\s+(?:de\s+)?(?:port|livraison|transport|exp[eé]dition)"
+            r"|port(?:\s+(?:et\s+emballage|forfaitaire))?|[eé]co[\s-]*(?:taxe?"
+            r"|contribution|participation)|(?:contribution|participation)\s+[eé]cologique"
+            r"|deee)\b", re.IGNORECASE
+        )
+        fee_boxes = [b for b in self.boxes if fee_label.search(b.text) and b.width and b.height]
+        def is_fee_row(box: BoxItem) -> bool:
+            if not box.width or box.y_max <= box.y_min:
+                return False
+            return any(
+                other is not box and other.y_max > other.y_min
+                and min(box.y_max, other.y_max) - max(box.y_min, other.y_min)
+                >= 0.5 * min(box.height, other.height)
+                for other in fee_boxes
+            )
+
+        def mask_fee_lines(box: BoxItem) -> str:
+            if is_fee_row(box):
+                return re.sub(r"[^\r\n]", "|", box.text)
+            lines = []
+            for line in box.text.splitlines(keepends=True):
+                match = fee_label.search(line)
+                if match:
+                    # Une ligne OCR peut regrouper un article précédent et les
+                    # frais ; conserver la partie précédant un S/N explicite.
+                    prefix = line[:match.start()]
+                    keep = bool(re.search(r"\b(?:s[/.-]?n|serial|s[eé]rie)\b", prefix, re.I))
+                    start = match.start() if keep else 0
+                    line = line[:start] + re.sub(r"[^\r\n]", "|", line[start:])
+                lines.append(line)
+            return "".join(lines)
+
+        serial_text = "\n".join(mask_fee_lines(b) for b in self.boxes)
         blacklist = {
             "FACTURE", "SIRET", "SIREN", "TOTAL", "CLIENT", "PATIENT", "PRIXHT", "MONTANT", "EUR", "DATE",
             "TRANSPORT", "ECOTAX", "ECOTAXE", "COMMANDE", "LIVRAISON", "GARANTIE", "EASYWEAR", "NOAHLINK",
@@ -591,7 +629,7 @@ class InvoiceParser:
             return True
 
         # 1. Motif explicite 'N° de série : XXXXX' ou 'N° de série : XXXXX - YYYYY' (Widex, Signia)
-        for m in re.finditer(r"(?:num[eé]ro\s+de\s+s[eé]rie|n[°o*]?\s*(?:de\s*)?s[eé]rie|serial(?:\s*no)?)\s*[:#\-]\s*([^\n\r]+)", self.full_text, re.IGNORECASE):
+        for m in re.finditer(r"(?:num[eé]ro\s+de\s+s[eé]rie|n[°o*]?\s*(?:de\s*)?s[eé]rie|serial(?:\s*no)?)\s*[:#\-]\s*([^\n\r]+)", serial_text, re.IGNORECASE):
             raw_val = m.group(1).strip()
             parts = re.split(r"[\s,\-/]+", raw_val)
             for part in parts:
@@ -600,7 +638,7 @@ class InvoiceParser:
                     serials_found.add(cand)
 
         # 2. Motif SN:(...) ou S/N: (...) avec support de multiples S/N séparés par virgule
-        for m in re.finditer(r"(?:S[/\-.]?N|SERIAL|S[EÉ]RIE)[\s.:#\-]*\(([^)]+)\)", self.full_text, re.IGNORECASE):
+        for m in re.finditer(r"(?:S[/\-.]?N|SERIAL|S[EÉ]RIE)[\s.:#\-]*\(([^)]+)\)", serial_text, re.IGNORECASE):
             content = m.group(1)
             for part in re.split(r"[,;/\s]+", content):
                 cand = re.sub(r"[^\w\-]", "", part).strip("-_").upper()
@@ -608,20 +646,20 @@ class InvoiceParser:
                     serials_found.add(cand)
 
         # 3. Motif standard SN: XXXXX
-        for m in re.finditer(r"(?:S[/\-.]?N|SERIAL|S[EÉ]RIE)[\s.:#\-]+([A-Z0-9]{6,16})\b", self.full_text, re.IGNORECASE):
+        for m in re.finditer(r"(?:S[/\-.]?N|SERIAL|S[EÉ]RIE)[\s.:#\-]+([A-Z0-9]{6,16})\b", serial_text, re.IGNORECASE):
             cand = re.sub(r"[^\w\-]", "", m.group(1)).strip("-_").upper()
             if is_valid_candidate(cand):
                 serials_found.add(cand)
 
         # 4. Motif embouts sur-mesure (ex: 250618GUAN1, 250618GUAN2 chez L'Atelier de l'Embout)
-        for m in re.finditer(r"\b(\d{6}[A-Z]{3,5}\d{1,2})\b", self.full_text):
+        for m in re.finditer(r"\b(\d{6}[A-Z]{3,5}\d{1,2})\b", serial_text):
             cand = m.group(1).upper()
             if is_valid_candidate(cand):
                 serials_found.add(cand)
 
         # 5. Motif facture patient sous ligne appareil : '2622x1GMK Garantie 4 ans' ou '2623X1XY) Garantle'
         for box in self.boxes:
-            box_text = box.text.strip()
+            box_text = mask_fee_lines(box).strip()
             m = re.search(r"\b([A-Z0-9]{6,12})[)\s]+(?:Garantie|Garantle|Phonak|Audéo|Oticon|Widex|Signia|LPP)", box_text, re.IGNORECASE)
             if m:
                 cand = re.sub(r"[^\w\-]", "", m.group(1)).strip("-_").upper()
@@ -636,7 +674,7 @@ class InvoiceParser:
         ]
 
         for pat in serial_patterns:
-            for match in re.finditer(pat, self.full_text, re.IGNORECASE):
+            for match in re.finditer(pat, serial_text, re.IGNORECASE):
                 val = match.group(1).strip("()[]:;#- ,_").upper()
                 if is_valid_candidate(val):
                     serials_found.add(val)
@@ -644,16 +682,19 @@ class InvoiceParser:
         # 7. Analyse spatiale pour colonnes de tableaux sous ancre S/N (ex: Colonne 'N° série')
         anchor_matches = self._find_anchor_matches(self.ANCHORS_SERIAL, category="serial", min_score=75)
         for anchor_box, _ in anchor_matches:
+            if fee_label.search(anchor_box.text) or is_fee_row(anchor_box):
+                continue
             # Exclure les boîtes qui contiennent déjà un S/N inline
             if re.search(r"(?:s[/\-.]?n|serial|s[eé]rie)[\s.:#\-]*\(?[A-Z0-9]{4,}", anchor_box.text, re.IGNORECASE):
                 continue
             for box in self.boxes:
-                if box is anchor_box:
+                if box is anchor_box or is_fee_row(box) or fee_label.search(box.text):
                     continue
                 dist_y = box.y_min - anchor_box.y_max
                 # Une valeur juste à droite d'un libellé n'est pas une colonne :
                 # ne pas parcourir les références des articles suivants.
                 inline_values = [b for b in self.boxes if b is not anchor_box
+                                 and not is_fee_row(b) and not fee_label.search(b.text)
                                  and b.x_min >= anchor_box.x_max - 5
                                  and abs(b.center_y - anchor_box.center_y) <= anchor_box.height * 0.7
                                  and re.fullmatch(r"[A-Z0-9 ,;]+", b.text, re.IGNORECASE)

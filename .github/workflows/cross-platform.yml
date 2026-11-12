@@ -50,6 +50,14 @@ jobs:
         run: python -m compileall -q facture-checker
       - name: Run tests without OCR downloads
         run: python -m unittest discover -s facture-checker/tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run JavaScript UI tests
+        run: |
+          node facture-checker/tests/test_search_ui.js
+          node facture-checker/tests/test_correction_ui.js
+          node facture-checker/tests/test_comparison_result_ui.js
       - name: Web smoke test
         run: >-
           python -c "from fastapi.testclient import TestClient; from web.app import app;

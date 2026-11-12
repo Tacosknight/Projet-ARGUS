@@ -248,6 +248,39 @@ class TestInvoiceParserSerialFiltering(unittest.TestCase):
         self.assertNotIn("2141401568", serials)  # Numéro de facture
 
 
+class TestFeeRows(unittest.TestCase):
+    @staticmethod
+    def box(text, x, y, width=120):
+        return {"text": text, "confidence": 0.99,
+                "box": [[x, y], [x + width, y], [x + width, y + 10], [x, y + 10]]}
+
+    def test_text_paths_and_shared_value(self):
+        text = """N° de série : 934534
+Transport SN: 2623X1XVY
+Éco-contribution AB-123456 250618GUAN1
+Frais de port N° de série : 934564
+SN: 2623X1XVY
+SN: 2626X07MU Transport AB-987654
+"""
+        parser = InvoiceParser([{"text": text, "confidence": 0.99}])
+        self.assertEqual(parser.extract_serial_numbers(), ["2623X1XVY", "2626X07MU", "934534"])
+
+    def test_separate_boxes_and_spatial_serial_column(self):
+        boxes = [self.box("N° de série", 200, 0),
+                 self.box("934534", 200, 30),
+                 self.box("Éco taxe", 20, 55),
+                 self.box("2623X1XVY", 200, 55),
+                 self.box("Transport", 20, 80),
+                 self.box("AB-123456", 200, 80),
+                 self.box("934564", 200, 105)]
+        self.assertEqual(InvoiceParser(boxes).extract_serial_numbers(), ["934534", "934564"])
+
+    def test_inline_anchor_next_to_fee_row(self):
+        boxes = [self.box("SN", 10, 10, 30), self.box("934534", 50, 10, 60),
+                 self.box("Frais de transport", 10, 35), self.box("2623X1XVY", 150, 35)]
+        self.assertEqual(InvoiceParser(boxes).extract_serial_numbers(), ["934534"])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from thefuzz import fuzz
@@ -265,6 +266,34 @@ class ReconciliationEngine:
                 "volume_dépenses_orphelines": 0.0, "solde_net_reconcilie": 0.0,
             },
         }
+
+
+def grouped_client_totals(invoices: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Somme documentaire du dossier, sans allocation par appareil ni avoir."""
+    total = Decimal("0")
+    details = []
+    seen = set()
+    for invoice in invoices:
+        if (invoice.get("invoice_type") or "").upper() != "CLIENT" or (invoice.get("document_type") or "FACTURE").upper() == "AVOIR":
+            continue
+        identity = invoice.get("id")
+        if identity is not None:
+            if identity in seen:
+                continue
+            seen.add(identity)
+        try:
+            amount = Decimal(str(invoice.get("montant_ttc")))
+            if not amount.is_finite():
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            amount = None
+        if amount is not None:
+            total += amount
+        details.append({"invoice_id": identity, "numero_facture": invoice.get("numero_facture"),
+                        "filename": invoice.get("filename"), "montant_ttc": float(amount) if amount is not None else None})
+    missing = sum(item["montant_ttc"] is None for item in details)
+    return {"factures": details, "nombre_factures": len(details), "montants_manquants": missing,
+            "total_connu_ttc": float(total), "complet": bool(details) and missing == 0}
 
 
 def reconcile_invoices(invoices: List[Dict[str, Any]]) -> Dict[str, Any]:

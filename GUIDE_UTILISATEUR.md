@@ -1,4 +1,4 @@
-# Guide utilisateur ARGUS 2.5.1
+# Guide utilisateur ARGUS 2.6.0
 
 **Pour les assistants et assistantes en audioprothèse — utilisation sur Windows**
 
@@ -6,7 +6,7 @@ ARGUS aide à lire les factures et à retrouver les appareils achetés et vendus
 
 > **Important :** ARGUS est une aide au contrôle. Même si un résultat paraît conforme, vérifiez les noms, les montants et les numéros de série sur les documents d’origine. Une correspondance « probable » doit être vérifiée : elle n’est pas une confirmation.
 >
-> Ce guide décrit la version **2.5.1**. Demandez l’archive au responsable de votre centre ou de l’informatique.
+> Ce guide décrit la version **2.6.0**. Demandez l’archive au responsable de votre centre ou de l’informatique.
 
 ## Sommaire
 
@@ -25,7 +25,7 @@ ARGUS aide à lire les factures et à retrouver les appareils achetés et vendus
 
 L’installation consiste à extraire le dossier du programme : il n’est pas nécessaire d’installer Python.
 
-1. Obtenez l’archive Windows `ARGUS-v2.5.1-Windows.zip` auprès de votre responsable.
+1. Obtenez l’archive Windows `ARGUS-v2.6.0-Windows.zip` auprès de votre responsable.
 2. Dans l’Explorateur Windows, faites un clic droit sur le fichier ZIP et choisissez **Extraire tout**.
 3. Choisissez un emplacement facile à retrouver, par exemple le dossier **Documents**, puis confirmez l’extraction.
 4. Ouvrez le dossier extrait jusqu’à voir `ARGUS.exe`.
@@ -60,9 +60,9 @@ Fermer l’onglet du navigateur ne garantit pas l’arrêt du programme ARGUS, q
 
 | Onglet | À quoi sert-il ? |
 |---|---|
-| **Rapprochement bilatéral** | Comparer une facture fournisseur et une facture patient, ou contrôler une seule facture. |
-| **Registre des factures** | Retrouver, consulter, corriger ou supprimer les factures enregistrées. |
-| **Audit des prothèses (S/N)** | Rechercher les appareils et examiner leurs correspondances par numéro de série. |
+| **Comparer** | Comparer une facture fournisseur et une facture patient, ou contrôler une seule facture. |
+| **Factures** | Retrouver, consulter, corriger ou supprimer les factures enregistrées. |
+| **Appareils** | Rechercher les appareils et examiner leurs correspondances par numéro de série. |
 | **Diagnostic** | Vérifier l’installation, sauvegarder ou restaurer les données. |
 
 **S/N** signifie *numéro de série* : c’est le numéro qui permet d’identifier un appareil.
@@ -71,11 +71,11 @@ Fermer l’onglet du navigateur ne garantit pas l’arrêt du programme ARGUS, q
 
 Utilisez ce mode quand vous disposez de la facture d’achat et de la facture de vente patient.
 
-1. Ouvrez **Rapprochement bilatéral**. Le mode de comparaison est activé par défaut.
+1. Ouvrez **Comparer**. Le mode de comparaison est activé par défaut.
 2. Dans **Facture fournisseur (achat)**, cliquez sur **Importer**, puis sélectionnez le PDF ou l’image de la facture fournisseur. Vous pouvez aussi déposer le fichier dans la zone prévue.
-3. Dans **Facture client (vente patient)**, importez la facture patient de la même façon.
+3. Dans **Facture client (vente patient)**, importez la facture patient de la même façon. Pour comparer plusieurs factures client distinctes, utilisez **Ajouter une facture client** et placez chaque facture dans sa propre zone.
 4. Si une facture comporte plusieurs fichiers, utilisez **+ Fichier / PDF** ou **+ Photo** pour ajouter ses autres pages dans la même zone. Retirez une sélection incorrecte à l’aide de la croix de son aperçu.
-5. Cliquez sur **Rapprocher les deux pièces justificatives** et patientez pendant le traitement.
+5. Cliquez sur **Comparer les factures** et patientez pendant le traitement.
 6. Examinez les informations et comparez-les aux deux originaux, notamment les noms, les appareils, les montants et les S/N.
 7. Si nécessaire, cliquez sur **Télécharger Synthèse Excel (.xlsx)** ou ouvrez **Gérer les factures** pour retrouver les pièces dans le registre.
 
@@ -87,13 +87,15 @@ Utilisez ce mode quand vous disposez de la facture d’achat et de la facture de
 - **Tolérance / équivalent** : ARGUS propose une correspondance proche ; une vérification est nécessaire.
 - **Anomalie / divergent** : une différence a été détectée ; consultez le détail et les originaux.
 
-La **marge brute TTC** affichée est un indicateur calculé à partir des montants disponibles : elle ne remplace pas un calcul comptable vérifié.
+Pour plusieurs factures client, le résultat groupé indique le total TTC connu et le détail par facture. Si un montant manque, la somme est indiquée comme partielle. Les avoirs ne sont pas inclus dans cette somme. Vérifiez les montants sur les documents : la lecture automatique peut se tromper.
+
+L’**écart TTC** affiché est calculé à partir des montants disponibles : il ne constitue pas à lui seul une marge comptable.
 
 Les factures traitées sont enregistrées automatiquement. Si la seconde facture ne peut pas être traitée, la première peut déjà avoir été enregistrée : vérifiez le registre avant de recommencer. **Nouveau Comparatif** remet la sélection à zéro, mais ne supprime pas les factures enregistrées.
 
 ## 5. Contrôler une facture seule
 
-1. Dans **Rapprochement bilatéral**, désactivez le commutateur **Rapprochement automatique bilatéral**.
+1. Dans **Comparer**, désactivez le commutateur **Comparer deux factures**.
 2. Choisissez **Détection automatique**, **Facture fournisseur** ou **Facture patient**.
 3. Cliquez sur **Importer un fichier (mono ou multi-pages, PDF)**, prenez une photo avec **Numériser par caméra**, ou déposez un fichier dans la zone prévue.
 4. Ajoutez au besoin les autres fichiers de la **même facture**, puis cliquez sur **Auditer la facture**.
@@ -114,8 +116,8 @@ ARGUS peut lire directement le texte d’une page PDF ou utiliser une reconnaiss
 
 ### Rechercher et consulter
 
-1. Ouvrez **Registre des factures**.
-2. Saisissez un **numéro de facture** et/ou un **fournisseur** dans les zones de recherche. Effacez les critères pour retrouver toute la liste.
+1. Ouvrez **Factures**.
+2. Saisissez un **numéro de facture** et/ou un **fournisseur** dans les zones de recherche. Choisissez une suggestion à la souris ou avec les flèches puis Entrée ; Échap ferme la liste. Effacez les critères pour retrouver toute la liste.
 3. Utilisez le bouton d’actualisation si nécessaire.
 4. Sur la facture souhaitée, cliquez sur **Voir le document** si ce lien est disponible.
 
@@ -144,7 +146,7 @@ Relisez toujours les montants avant d’enregistrer. Si seul le HT est saisi, l�
 
 ## 7. Consulter l’audit des prothèses
 
-Ouvrez **Audit des prothèses (S/N)** pour rechercher les appareils parmi l’ensemble des factures enregistrées.
+Ouvrez **Appareils** pour rechercher les appareils parmi l’ensemble des factures enregistrées.
 
 - Dans **Recherche globale**, saisissez par exemple un S/N, un nom de patient, un produit ou un numéro de facture.
 - Utilisez **Fournisseur** pour limiter la liste affichée et **Tri** pour changer son ordre.
@@ -176,12 +178,12 @@ La disponibilité de la caméra et de l’aperçu PDF dépend du navigateur et d
 
 ### Vérifier mon installation
 
-Dans **Diagnostic**, cliquez sur **Vérifier mon installation**. ARGUS contrôle notamment l’accès à ses données, la lecture des PDF, la présence des fichiers de modèles et l’espace disque disponible. Si un contrôle échoue, transmettez son message au responsable informatique.
+Dans **Diagnostic**, le contrôle démarre automatiquement. Cliquez sur **Vérifier à nouveau** pour le relancer. ARGUS contrôle notamment l’accès à ses données, la lecture des PDF, la présence des fichiers de modèles et l’espace disque disponible. Si un contrôle échoue, transmettez son message au responsable informatique.
 
 ### Sauvegarder mes données
 
 1. Ouvrez **Diagnostic**.
-2. Cliquez sur **Sauvegarder mes données**.
+2. Cliquez sur **Télécharger une sauvegarde**.
 3. Enregistrez le fichier ZIP téléchargé dans l’emplacement protégé prévu par votre établissement.
 
 La sauvegarde peut contenir des factures et des données de patients : ne l’envoyez pas par un canal non autorisé. Effectuez des sauvegardes régulièrement, et avant toute purge, restauration ou mise à jour.
@@ -190,7 +192,7 @@ La sauvegarde peut contenir des factures et des données de patients : ne l’en
 
 > **Avant de commencer :** téléchargez et conservez une sauvegarde de l’état actuel. La restauration remplace la base de données active ; elle fusionne les documents de la sauvegarde avec les documents déjà importés, et peut remplacer des fichiers portant le même nom.
 
-1. Dans **Diagnostic**, cliquez sur **Restaurer une sauvegarde**.
+1. Dans **Diagnostic**, cliquez sur **Choisir une sauvegarde à restaurer**.
 2. Choisissez le ZIP de sauvegarde ARGUS voulu.
 3. Lisez le message de confirmation, puis confirmez uniquement si vous souhaitez remplacer les données actives.
 4. Attendez la fin du traitement et vérifiez le registre.
