@@ -166,27 +166,75 @@ class ReconciliationEngine:
         matched_sales: set[int] = set()
         output: List[Dict[str, Any]] = []
 
-        for purchase in purchases:
-            found_index: Optional[int] = None
-            method = ""
-            if purchase.get("serial_number"):
-                for index, sale in enumerate(sales):
-                    if index in matched_sales or not sale.get("serial_number"):
+        def duplicates(entries: List[Dict[str, Any]]) -> set[str]:
+            seen: set[str] = set()
+            repeated: set[str] = set()
+            for entry in entries:
+                serial = entry.get("serial_number")
+                if serial:
+                    if serial in seen:
+                        repeated.add(serial)
+                    seen.add(serial)
+            return repeated
+
+        repeated = duplicates(purchases) | duplicates(sales)
+        review_purchases = {i for i, entry in enumerate(purchases) if entry.get("serial_number") in repeated}
+        review_sales = {i for i, entry in enumerate(sales) if entry.get("serial_number") in repeated}
+        matches: Dict[int, Tuple[int, str]] = {}
+
+        # Les correspondances exactes priment sur l'OCR, puis sur le modèle.
+        # Chaque lien doit être unique des deux côtés et ne pas impliquer un
+        # numéro dupliqué ou une ligne déjà ambiguë.
+        for method in ("S/N exact", "S/N tolérance OCR", "Marque + modèle probable"):
+            candidates: Dict[int, List[int]] = {}
+            for pi, purchase in enumerate(purchases):
+                if pi in matches:
+                    continue
+                for si, sale in enumerate(sales):
+                    if si in matched_sales:
                         continue
-                    candidate = find_fuzzy_match(purchase["serial_number"], [sale["serial_number"]])
-                    if candidate:
-                        found_index, method = index, "S/N exact" if candidate == purchase["serial_number"] else "S/N tolérance OCR"
-                        break
-            if found_index is None and purchase.get("product_name"):
-                for index, sale in enumerate(sales):
-                    if index not in matched_sales and sale.get("product_name") and _product_match(purchase["product_name"], sale["product_name"]):
-                        found_index, method = index, "Marque + modèle probable"
-                        break
-            if found_index is None:
+                    left, right = purchase.get("serial_number"), sale.get("serial_number")
+                    if method == "S/N exact":
+                        eligible = bool(left and right and left == right)
+                    elif method == "S/N tolérance OCR":
+                        eligible = bool(left and right and left != right and find_fuzzy_match(left, [right]))
+                    else:
+                        eligible = bool(purchase.get("product_name") and sale.get("product_name") and _product_match(purchase["product_name"], sale["product_name"]))
+                    if eligible:
+                        candidates.setdefault(pi, []).append(si)
+            sale_counts: Dict[int, int] = {}
+            for indices in candidates.values():
+                for si in indices:
+                    sale_counts[si] = sale_counts.get(si, 0) + 1
+            ambiguous_purchases = {
+                pi for pi, indices in candidates.items()
+                if pi in review_purchases or len(indices) != 1
+                or any(si in review_sales or sale_counts[si] != 1 for si in indices)
+            }
+            ambiguous_sales = {si for pi in ambiguous_purchases for si in candidates[pi]}
+            # Un candidat relié à une ligne ambiguë ne peut pas être attribué.
+            while True:
+                more = {pi for pi, indices in candidates.items() if any(si in ambiguous_sales for si in indices)} - ambiguous_purchases
+                if not more:
+                    break
+                ambiguous_purchases.update(more)
+                ambiguous_sales.update(si for pi in more for si in candidates[pi])
+            review_purchases.update(ambiguous_purchases)
+            review_sales.update(ambiguous_sales)
+            for pi, indices in candidates.items():
+                if pi not in review_purchases:
+                    matches[pi] = (indices[0], method)
+                    matched_sales.add(indices[0])
+
+        for index, purchase in enumerate(purchases):
+            if index in review_purchases:
+                output.append(self._make_item(STATUS_REVIEW, "Numéro de série dupliqué ou correspondance ambiguë : à vérifier.", purchase, None, "À vérifier", self._credits_for(purchase["invoice"])))
+                continue
+            if index not in matches:
                 output.append(self._make_item(STATUS_PENDING, "Achat détecté ; aucune vente correspondante parmi les documents actuellement importés.", purchase, None, "En attente", self._credits_for(purchase["invoice"])))
                 continue
+            found_index, method = matches[index]
             sale = sales[found_index]
-            matched_sales.add(found_index)
             exact = method == "S/N exact"
             status = STATUS_EXACT if exact else STATUS_PROBABLE
             detail = "Même numéro de série détecté." if exact else f"Correspondance {method.lower()} ; confirmation humaine recommandée."
@@ -196,7 +244,10 @@ class ReconciliationEngine:
 
         for index, sale in enumerate(sales):
             if index not in matched_sales:
-                output.append(self._make_item(STATUS_REVIEW, "Vente détectée sans achat correspondant parmi les documents importés : à vérifier.", None, sale, "Achat à rechercher", self._credits_for(sale["invoice"])))
+                diagnostic = ("Numéro de série dupliqué ou correspondance ambiguë : à vérifier."
+                              if index in review_sales else
+                              "Vente détectée sans achat correspondant parmi les documents importés : à vérifier.")
+                output.append(self._make_item(STATUS_REVIEW, diagnostic, None, sale, "Achat à rechercher", self._credits_for(sale["invoice"])))
 
         counts = {status: sum(item["status"] == status for item in output) for status in (STATUS_EXACT, STATUS_PROBABLE, STATUS_PENDING, STATUS_REVIEW)}
         comparable = [item for item in output if item["prix_comparable"]]

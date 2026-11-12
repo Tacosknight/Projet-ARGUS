@@ -20,6 +20,9 @@ const ids = list => Array.from(list, item => item.id);
 assert.deepEqual(ids(context.filterInvoices(invoices, '', '')), [2, 5, 1, 4, 3]);
 assert.deepEqual(ids(context.filterInvoices(invoices, 'a-', 'ecoute')), [5, 1]);
 assert.deepEqual(ids(context.filterInvoices(invoices, 'inconnu', '')), []);
+const clients = [{id: 6, invoice_type: 'CLIENT', fournisseur_nom: 'Signia', emetteur_nom: 'Phonème'}, {id: 7, invoice_type: 'CLIENT', fournisseur_nom: 'Phonème', emetteur_nom: null}];
+assert.deepEqual(ids(context.filterInvoices(clients, '', 'phoneme')), [6]);
+assert.deepEqual(ids(context.filterInvoices(clients, '', 'signia')), []);
 assert.equal(context.invoiceDateKey('31/02/2025'), null);
 const items = [
     { serial_number: 'SN123', fournisseur_nom: 'Écoute', patient_nom: 'Alice', achat_num_facture: 'FAC-9' },
@@ -33,4 +36,22 @@ assert.deepEqual(serials(context.filterReconciliation(items, '', '', 'supplier-a
 assert.deepEqual(serials(context.filterReconciliation(items, '', '', 'supplier-desc')), ['SN123', 'SN456', '—']);
 assert.deepEqual(serials(context.filterReconciliation(items, 'absent', '', 'original')), []);
 assert.equal(context.filterReconciliation(items, '', '', 'original').length, 3);
+const suggestions = (rows, fields, query, limit) => Array.from(context.searchSuggestions(rows, fields, query, limit));
+assert.deepEqual(suggestions(invoices, ['fournisseur_nom'], 'ecoute'), ['Écoute']);
+assert.deepEqual(suggestions(invoices, ['numero_facture'], 'a-', 2), ['A-12', 'A-13']);
+assert.deepEqual(suggestions(context.filterInvoices(invoices, '', 'autre'), ['numero_facture'], ''), ['A-13']);
+assert.deepEqual(suggestions(items, ['serial_number', 'patient_nom', 'achat_num_facture'], ''), ['Alice', 'FAC-9', 'SN123', 'SN456']);
+assert.deepEqual(suggestions(context.filterReconciliation(items, '', 'autre', 'original'), ['patient_nom', 'serial_number'], ''), ['Alice', 'SN456']);
+const malicious = '<img src=x onerror=alert(1)>';
+const list = { replaceChildren(...options) { this.options = options; } };
+context.document = { getElementById: () => list, createElement: () => ({}) };
+context.updateSearchSuggestions('test', [malicious]);
+assert.equal(list.options[0].value, malicious);
+assert.equal(list.options[0].innerHTML, undefined);
+context.updateSearchSuggestions('test', []);
+assert.equal(list.options.length, 0);
+for (const [input, datalist] of [['invoiceNumberSearch', 'invoiceNumberSuggestions'], ['invoiceSupplierSearch', 'invoiceSupplierSuggestions'], ['recSearch', 'recSuggestions'], ['recSupplierSearch', 'recSupplierSuggestions']]) {
+    assert.match(html, new RegExp(`<input id="${input}"[^>]*list="${datalist}"`));
+    assert.match(html, new RegExp(`<datalist id="${datalist}"></datalist>`));
+}
 console.log('Tests de recherche et de tri réussis.');

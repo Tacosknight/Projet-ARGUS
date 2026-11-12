@@ -7,6 +7,7 @@ d'analyser l'intégrité légale et de suivre le rapprochement financier en temp
 
 from datetime import datetime
 import json
+import hashlib
 import logging
 from pathlib import Path
 import shutil
@@ -20,7 +21,7 @@ from functools import wraps
 from uuid import uuid4
 from typing import Any, Dict, List, Optional
 import re
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile, Request
 from starlette.background import BackgroundTask
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -60,7 +61,7 @@ logger = logging.getLogger("FactureChecker.Web")
 app = FastAPI(
     title="Facture-Checker Mobile",
     description="Scanner et auditeur de factures d'aides auditives avec rapprochement S/N.",
-    version="2.0.0",
+    version="2.5.0",
 )
 
 app.add_middleware(
@@ -118,6 +119,8 @@ def process_uploaded_invoice_files(
     uploaded_files: List[UploadFile],
     invoice_type: Optional[str] = None,
     prefix: str = "scan",
+    merge_existing: bool = True,
+    direct_upload_fingerprint: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Traite un ensemble de fichiers/photos correspondant à une même facture :
@@ -174,6 +177,7 @@ def process_uploaded_invoice_files(
                         "filename": page_filename,
                         "source_documents": source_documents,
                         "invoice_type": invoice_type or "FOURNISSEUR",
+                        "marque_client": "Phoneme" if invoice_type == "CLIENT" else None,
                         "status": "A_VERIFIER",
                         "error_details": ["Aucun texte lisible détecté sur cette page."],
                         "serial_numbers": [],
@@ -205,7 +209,7 @@ def process_uploaded_invoice_files(
     else:
         # Une seule page uploadée : vérifier si elle complète une facture existante en BDD
         record = parsed_pages[0]
-        if record.get("page_total", 1) > 1 or record.get("page_current", 1) > 1:
+        if merge_existing and (record.get("page_total", 1) > 1 or record.get("page_current", 1) > 1):
             all_existing = db.get_all_invoices()
             for ex in all_existing:
                 if are_pages_of_same_invoice(ex, record):
@@ -226,6 +230,8 @@ def process_uploaded_invoice_files(
             db.delete_invoice(replaced_old_id)
         except Exception:
             pass
+    if direct_upload_fingerprint:
+        record["direct_upload_fingerprint"] = direct_upload_fingerprint
     record["id"] = db.save_invoice(record)
     # Informations de traitement transitoires : ne modifient pas le schéma historique.
     record["extraction_pages"] = extraction_pages
@@ -382,6 +388,50 @@ async def compare_invoices_endpoint(
 
 
 
+@app.post("/api/compare-grouped")
+@serialized_data
+async def compare_grouped(request: Request) -> JSONResponse:
+    """Multipart : vendor_files, client_0, client_1… ; chaque champ est une facture."""
+    form = await request.form()
+    keys = sorted((key for key in form.keys() if re.fullmatch(r"client_\d+", key)), key=lambda k: int(k[7:]))
+    groups = [("fournisseur", "FOURNISSEUR", form.getlist("vendor_files"))]
+    groups += [(key, "CLIENT", form.getlist(key)) for key in keys]
+    if not keys or any(not files or any(not getattr(f, "filename", None) for f in files) for _, _, files in groups):
+        raise HTTPException(400, "Fournissez une facture fournisseur et au moins un groupe client non vide.")
+
+    results, records, seen = [], [], set()
+    for key, kind, files in groups:
+        try:
+            digest = hashlib.sha256(kind.encode())
+            for upload in files:
+                upload.file.seek(0)
+                content_hash = hashlib.sha256()
+                for chunk in iter(lambda: upload.file.read(1024 * 1024), b""):
+                    content_hash.update(chunk)
+                upload.file.seek(0)
+                digest.update(content_hash.digest())
+            fingerprint = digest.hexdigest()
+            if fingerprint in seen:
+                raise HTTPException(400, "Ce groupe est identique à un autre groupe du dossier.")
+            seen.add(fingerprint)
+            record = db.get_direct_upload(fingerprint)
+            reused = record is not None
+            if not record:
+                record = process_uploaded_invoice_files(files, invoice_type=kind, prefix=key,
+                                                        merge_existing=False, direct_upload_fingerprint=fingerprint)
+            records.append(record)
+            results.append({"group": key, "invoice_id": record["id"], "reused": reused, "status": "enregistré"})
+        except Exception as exc:
+            logger.warning("Groupe %s non traité (%s)", key, type(exc).__name__)
+            detail = exc.detail if isinstance(exc, HTTPException) else "Erreur de traitement du document."
+            results.append({"group": key, "status": "échec", "error": str(detail)})
+    complete = len(records) == len(groups)
+    warnings = refresh_excel(db.get_all_invoices()) if records else []
+    return JSONResponse({"complete": complete, "groups": results,
+                         "reconciliation": reconcile_invoices(records) if complete else None,
+                         "warnings": warnings})
+
+
 @app.get("/api/reconciliation")
 async def get_reconciliation_report() -> JSONResponse:
     """Retourne l'état complet du rapprochement Fournisseur / Client par S/N."""
@@ -453,6 +503,11 @@ async def update_single_invoice(
     from storage.database import InvoiceConflict
 
     updates = dict(updates)
+    for field in ("emetteur_nom", "marque_produit"):
+        if field in updates:
+            if updates[field] is not None and not isinstance(updates[field], str):
+                raise HTTPException(status_code=400, detail=f"Valeur invalide pour {field}.")
+            updates[field] = (updates[field] or "").strip() or None
     expected_revision = updates.pop("expected_revision", None)
     if expected_revision is not None and (not isinstance(expected_revision, str) or not expected_revision):
         raise HTTPException(status_code=400, detail="Révision invalide.")

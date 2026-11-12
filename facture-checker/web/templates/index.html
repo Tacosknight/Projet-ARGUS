@@ -1577,15 +1577,24 @@
                 </div>
             </div>
 
+            <div class="card" style="margin-top:12px; padding:14px;">
+                <strong>Factures client supplémentaires</strong>
+                <p>La zone client ci-dessus représente la première facture. Ajoutez un groupe par facture distincte ; chaque groupe peut contenir plusieurs pages.</p>
+                <div id="extraClientGroups"></div>
+                <button type="button" class="btn-secondary" onclick="addClientGroup()">Ajouter une facture client</button>
+            </div>
+            <div id="groupedCompareResult" class="card" style="display:none; margin-top:12px; padding:14px;" aria-live="polite"></div>
+
             <!-- Bouton d'action principal -->
             <button id="btnLaunchCompare" class="btn-launch-compare" onclick="uploadAndCompare()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Rapprocher les deux pièces justificatives
             </button>
 
+            <div id="compareError" role="alert" style="display:none; margin-top:12px;"></div>
             <!-- Loading Comparaison -->
-            <div id="compareLoadingBox" class="loading-box">
+            <div id="compareLoadingBox" class="loading-box" role="status" aria-live="polite">
                 <div class="spinner"></div>
-                <div id="compareLoadingStep" class="step-label">Redressement & OCR des deux factures...</div>
+                <div id="compareLoadingStep" class="step-label">Analyse en cours…</div>
             </div>
         </div>
 
@@ -1838,9 +1847,11 @@
             </div>
 
             <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:14px;">
-                <label style="flex:1; min-width:200px;">Numéro de facture<br><input id="invoiceNumberSearch" type="search" placeholder="Rechercher un numéro" oninput="renderInvoicesList()" style="width:100%;"></label>
-                <label style="flex:1; min-width:200px;">Fournisseur<br><input id="invoiceSupplierSearch" type="search" placeholder="Rechercher un fournisseur" oninput="renderInvoicesList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:200px;">Numéro de facture<br><input id="invoiceNumberSearch" type="search" list="invoiceNumberSuggestions" autocomplete="off" placeholder="Rechercher un numéro" oninput="renderInvoicesList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:200px;">Fournisseur / émetteur<br><input id="invoiceSupplierSearch" type="search" list="invoiceSupplierSuggestions" autocomplete="off" placeholder="Rechercher un fournisseur ou émetteur" oninput="renderInvoicesList()" style="width:100%;"></label>
             </div>
+            <datalist id="invoiceNumberSuggestions"></datalist>
+            <datalist id="invoiceSupplierSuggestions"></datalist>
             <!-- Liste des factures -->
             <div id="invoicesListContainer"></div>
         </div>
@@ -1856,10 +1867,12 @@
                 Chargement des données...
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
-                <label style="flex:2; min-width:200px;">Recherche globale<br><input id="recSearch" type="search" placeholder="S/N, patient, produit, facture…" oninput="renderReconciliationList()" style="width:100%;"></label>
-                <label style="flex:1; min-width:180px;">Fournisseur<br><input id="recSupplierSearch" type="search" placeholder="Filtrer par fournisseur" oninput="renderReconciliationList()" style="width:100%;"></label>
+                <label style="flex:2; min-width:200px;">Recherche globale<br><input id="recSearch" type="search" list="recSuggestions" autocomplete="off" placeholder="S/N, patient, produit, facture…" oninput="renderReconciliationList()" style="width:100%;"></label>
+                <label style="flex:1; min-width:180px;">Fournisseur<br><input id="recSupplierSearch" type="search" list="recSupplierSuggestions" autocomplete="off" placeholder="Filtrer par fournisseur" oninput="renderReconciliationList()" style="width:100%;"></label>
                 <label style="flex:1; min-width:180px;">Tri<br><select id="recSort" onchange="renderReconciliationList()" style="width:100%;"><option value="original">Ordre initial</option><option value="supplier-asc">Fournisseur A–Z</option><option value="supplier-desc">Fournisseur Z–A</option></select></label>
             </div>
+            <datalist id="recSuggestions"></datalist>
+            <datalist id="recSupplierSuggestions"></datalist>
             <div id="recResultCount" aria-live="polite" style="font-size:.85rem; color:var(--text-secondary); margin-bottom:8px;"></div>
             <div id="recList"></div>
             <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
@@ -1907,7 +1920,8 @@
                     <iframe id="correctionPreview" class="correction-preview" title="Aperçu du document original"></iframe>
                 </section>
                 <form id="correctionForm" class="correction-fields" onsubmit="saveCorrection(event)">
-                    <label for="correctionSupplier">Fournisseur / fabricant</label><input id="correctionSupplier" class="modal-input" type="text">
+                    <label for="correctionSupplier" id="correctionSupplierLabel">Fournisseur</label><input id="correctionSupplier" class="modal-input" type="text">
+                    <label for="correctionBrand">Marque produit détectée</label><input id="correctionBrand" class="modal-input" type="text">
                     <label for="correctionPatient">Client / patient</label><input id="correctionPatient" class="modal-input" type="text">
                     <div><strong>Numéros de série</strong><p>Vérifiez chaque numéro sur la facture. Pour un numéro présent sur plusieurs lignes, choisissez les lignes à modifier.</p><div id="correctionSerials"></div></div>
                     <p id="correctionMessage" role="status" aria-live="polite"></p>
@@ -1966,11 +1980,15 @@
                         <input type="text" id="editDateFacture" class="modal-input" placeholder="ex: 2025-06-12">
                     </div>
                     <div style="flex: 1;">
-                        <label class="meta-label">Fournisseur / Fabricant</label>
+                        <label class="meta-label">Fournisseur (factures fournisseur)</label>
                         <input type="text" id="editFournisseur" class="modal-input" placeholder="ex: Widex, Signia...">
                     </div>
                 </div>
 
+                <div style="display: flex; gap: 10px;">
+                    <div style="flex: 1;"><label for="editEmitter" class="meta-label">Émetteur client</label><input type="text" id="editEmitter" class="modal-input"></div>
+                    <div style="flex: 1;"><label for="editBrand" class="meta-label">Marque produit détectée</label><input type="text" id="editBrand" class="modal-input"></div>
+                </div>
                 <div>
                     <label class="meta-label">Nom du Patient</label>
                     <input type="text" id="editPatient" class="modal-input" placeholder="ex: Beaufils, Guenole...">
@@ -2344,16 +2362,88 @@
         // ==========================================
         // ANALYSE & COMPARAISON DIRECTE 2 FACTURES
         // ==========================================
+        function addClientGroup() {
+            const group = document.createElement('div');
+            group.style.cssText = 'margin:10px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+            const label = document.createElement('label');
+            label.textContent = 'Pages de la facture client supplémentaire ';
+            const input = document.createElement('input');
+            input.type = 'file'; input.multiple = true; input.accept = 'image/*,.pdf,application/pdf';
+            label.appendChild(input);
+            const remove = document.createElement('button');
+            remove.type = 'button'; remove.className = 'btn-secondary'; remove.textContent = 'Supprimer ce groupe';
+            remove.onclick = () => group.remove();
+            group.append(label, remove);
+            document.getElementById('extraClientGroups').appendChild(group);
+        }
+
+        function groupedInvoiceLabel(number, id, missingLabel) {
+            const value = String(number ?? '').trim();
+            if (value && value !== '—') return value;
+            return id !== null && id !== undefined && id !== '' ? `#${id}` : missingLabel;
+        }
+
+        function showCompareError(message) {
+            const error = document.getElementById('compareError');
+            error.textContent = message;
+            error.style.display = message ? 'block' : 'none';
+        }
+
+        async function uploadGroupedComparison() {
+            const groups = [...document.querySelectorAll('#extraClientGroups input[type=file]')];
+            if (groups.some(input => !input.files.length)) { showCompareError('Ajoutez des fichiers à chaque groupe ou supprimez le groupe vide.'); return; }
+            const data = new FormData();
+            vendorFiles.forEach(file => data.append('vendor_files', file));
+            clientFiles.forEach(file => data.append('client_0', file));
+            groups.forEach((input, index) => [...input.files].forEach(file => data.append(`client_${index + 1}`, file)));
+            const btn = document.getElementById('btnLaunchCompare');
+            const box = document.getElementById('groupedCompareResult');
+            document.getElementById('compareResultBox').style.display = 'none';
+            box.style.display = 'block'; box.textContent = 'Analyse des factures en cours…'; btn.disabled = true;
+            try {
+                const response = await fetch('/api/compare-grouped', { method: 'POST', body: data });
+                const result = await readApiResponse(response, 'Échec de la comparaison.');
+                box.replaceChildren();
+                const heading = document.createElement('h3'); heading.textContent = result.complete ? 'Rapprochement du dossier' : 'Dossier incomplet : reprendre après correction des échecs'; box.appendChild(heading);
+                result.groups.forEach(group => {
+                    const line = document.createElement('p');
+                    line.textContent = `${group.group} : ${group.status}${group.invoice_id ? ` — facture enregistrée n° ${group.invoice_id}${group.reused ? ' (réutilisée)' : ''}` : ''}${group.error ? ` — ${group.error}` : ''}`;
+                    box.appendChild(line);
+                });
+                (result.warnings || []).forEach(warning => { const p = document.createElement('p'); p.textContent = warning; box.appendChild(p); });
+                if (result.complete) {
+                    const table = document.createElement('table'); table.className = 'compare-table';
+                    const header = document.createElement('tr');
+                    ['Achat', 'Vente', 'N° série', 'Méthode', 'Statut / diagnostic'].forEach(text => { const th = document.createElement('th'); th.textContent = text; header.appendChild(th); });
+                    table.appendChild(header);
+                    (result.reconciliation.items || []).forEach(item => {
+                        const row = document.createElement('tr');
+                        [groupedInvoiceLabel(item.achat_num_facture, item.achat_invoice_id, 'Sans achat'), groupedInvoiceLabel(item.vente_num_facture, item.vente_invoice_id, 'En attente'), item.serial_number, item.match_method, `${item.status} — ${item.diagnostic}`].forEach(value => { const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell); });
+                        table.appendChild(row);
+                    });
+                    box.appendChild(table);
+                }
+                updateInvoiceCountBadge();
+            } catch (err) { box.textContent = `Erreur : ${err.message}. Relancez sans modifier les groupes déjà enregistrés.`; }
+            finally { btn.disabled = false; }
+        }
+
         async function uploadAndCompare() {
+            showCompareError('');
             if (vendorFiles.length === 0) {
-                alert("Veuillez charger au moins une photo ou page pour la Facture Fournisseur.");
+                showCompareError('Veuillez charger au moins une photo ou page pour la facture fournisseur.');
                 return;
             }
             if (clientFiles.length === 0) {
-                alert("Veuillez charger au moins une photo ou page pour la Facture Client.");
+                showCompareError('Veuillez charger au moins une photo ou page pour la facture client.');
                 return;
             }
 
+            if (document.querySelector('#extraClientGroups input[type=file]')) {
+                await uploadGroupedComparison();
+                return;
+            }
+            document.getElementById('groupedCompareResult').style.display = 'none';
             const loadingBox = document.getElementById('compareLoadingBox');
             const loadingStep = document.getElementById('compareLoadingStep');
             const resultBox = document.getElementById('compareResultBox');
@@ -2363,18 +2453,10 @@
             resultBox.style.display = 'none';
             btn.disabled = true;
 
-            const steps = [
-                "Redressement 4 points & OCR de la Facture Fournisseur...",
-                "Redressement 4 points & OCR de la Facture Client...",
-                "Extraction et confrontation des numéros de série (S/N)...",
-                "Contrôle fiscal, TVA et marge brute...",
-                "Génération du tableau comparatif 2 colonnes..."
-            ];
-            let stepIdx = 0;
-            const interval = setInterval(() => {
-                stepIdx = (stepIdx + 1) % steps.length;
-                loadingStep.innerText = steps[stepIdx];
-            }, 1200);
+            const started = Date.now();
+            const updateElapsed = () => { loadingStep.textContent = `Analyse en cours… ${Math.floor((Date.now() - started) / 1000)} s`; };
+            updateElapsed();
+            const interval = setInterval(updateElapsed, 1000);
 
             const formData = new FormData();
             vendorFiles.forEach(f => formData.append('vendor_files', f));
@@ -2386,19 +2468,16 @@
                     body: formData
                 });
 
-                clearInterval(interval);
-                loadingBox.style.display = 'none';
-                btn.disabled = false;
-
                 const data = await readApiResponse(response, "Échec de l'analyse comparative.");
                 renderComparisonResult(data);
                 updateInvoiceCountBadge();
 
             } catch (err) {
+                showCompareError(`Erreur de comparaison : ${err.message}. Vérifiez les fichiers ou la connexion, puis relancez.`);
+            } finally {
                 clearInterval(interval);
                 loadingBox.style.display = 'none';
                 btn.disabled = false;
-                alert("Erreur de comparaison : " + err.message);
             }
         }
 
@@ -2865,7 +2944,7 @@
             document.getElementById('valDate').innerText = data.date_facture || "Non détectée";
             document.getElementById('valHt').innerText = data.montant_ht !== null ? data.montant_ht.toFixed(2) + " €" : "-- €";
             document.getElementById('valTva').innerText = data.montant_tva !== null ? data.montant_tva.toFixed(2) + " €" : "-- €";
-            document.getElementById('valTiers').innerText = (data.invoice_type === "CLIENT" ? data.patient_nom : data.fournisseur_nom) || "Non identifié";
+            document.getElementById('valTiers').innerText = data.invoice_type === 'CLIENT' ? `Émetteur : ${data.emetteur_nom || 'Non identifié'} · Marque client : Phoneme${data.patient_nom ? ' · Patient : ' + data.patient_nom : ''}` : (data.fournisseur_nom || 'Non identifié');
             document.getElementById('valSiret').innerText = data.siret || (data.siren ? "SIREN: " + data.siren : "Absent");
 
             const errorAlert = document.getElementById('errorAlert');
@@ -2914,7 +2993,7 @@
 
         function filterInvoices(invoices, number, supplier) {
             const n = normalizeSearch(number), s = normalizeSearch(supplier);
-            return invoices.filter(inv => normalizeSearch(inv.numero_facture).includes(n) && normalizeSearch(inv.fournisseur_nom).includes(s))
+            return invoices.filter(inv => normalizeSearch(inv.numero_facture).includes(n) && normalizeSearch((inv.invoice_type || '').toUpperCase() === 'CLIENT' ? inv.emetteur_nom : inv.fournisseur_nom).includes(s))
                 .sort((a, b) => {
                     const da = invoiceDateKey(a.date_facture), db = invoiceDateKey(b.date_facture);
                     if (da === null && db !== null) return 1;
@@ -2939,6 +3018,31 @@
             return result;
         }
 
+        // Les suggestions proviennent uniquement des lignes correspondant aux autres filtres.
+        function searchSuggestions(items, fields, query, limit = 20) {
+            const needle = normalizeSearch(query);
+            const unique = new Map();
+            for (const item of items) {
+                for (const field of fields) {
+                    const value = String(item[field] ?? '').trim();
+                    const key = normalizeSearch(value);
+                    if (!key || value === '—' || !key.includes(needle)) continue;
+                    if (!unique.has(key)) unique.set(key, value);
+                }
+            }
+            const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true });
+            return Array.from(unique.values()).sort((a, b) => collator.compare(a, b)).slice(0, limit);
+        }
+
+        function updateSearchSuggestions(id, values) {
+            const list = document.getElementById(id);
+            list.replaceChildren(...values.map(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                return option;
+            }));
+        }
+
         let reconciliationItems = null;
         let reconciliationRequest = 0;
         async function loadReconciliationData() {
@@ -2946,6 +3050,8 @@
             const summary = document.getElementById('recSummary');
             const request = ++reconciliationRequest;
             reconciliationItems = null;
+            updateSearchSuggestions('recSuggestions', []);
+            updateSearchSuggestions('recSupplierSuggestions', []);
             document.getElementById('recResultCount').textContent = '';
             list.innerHTML = "<div style='text-align:center; padding:20px;'>Chargement...</div>";
 
@@ -2981,17 +3087,24 @@
                 `;
 
                 renderReconciliationList();
+                return true;
             } catch (err) {
-                if (request !== reconciliationRequest) return;
+                if (request !== reconciliationRequest) return false;
                 summary.textContent = 'Impossible de charger les indicateurs.';
                 list.innerHTML = "<div style='color:red;'>Erreur de chargement.</div>";
+                return false;
             }
         }
 
         function renderReconciliationList() {
                 if (!reconciliationItems) return;
                 const list = document.getElementById('recList');
-                const items = filterReconciliation(reconciliationItems, document.getElementById('recSearch').value, document.getElementById('recSupplierSearch').value, document.getElementById('recSort').value);
+                const query = document.getElementById('recSearch').value;
+                const supplier = document.getElementById('recSupplierSearch').value;
+                const sort = document.getElementById('recSort').value;
+                const items = filterReconciliation(reconciliationItems, query, supplier, sort);
+                updateSearchSuggestions('recSuggestions', searchSuggestions(filterReconciliation(reconciliationItems, '', supplier, sort), ['serial_number', 'patient_nom', 'produit_nom', 'produit_achat', 'produit_vente', 'achat_num_facture', 'vente_num_facture'], query));
+                updateSearchSuggestions('recSupplierSuggestions', searchSuggestions(filterReconciliation(reconciliationItems, query, '', sort), ['fournisseur_nom'], supplier));
                 document.getElementById('recResultCount').textContent = `${items.length} résultat(s) sur ${reconciliationItems.length} · Indicateurs et export : ensemble des données`;
                 list.innerHTML = "";
                 if (items.length === 0) {
@@ -3030,6 +3143,17 @@
                             <span>${escapeHtml(item.diagnostic || '—')}</span>
                         </div>
                     `;
+                    for (const [id, label, side] of [[item.achat_invoice_id, 'Corriger l’achat', 'achat'], [item.vente_invoice_id, 'Corriger la vente', 'vente']]) {
+                        if (!Number.isSafeInteger(Number(id)) || id === null || id === undefined || id === '') continue;
+                        const button = document.createElement('button');
+                        button.type = 'button';
+                        button.className = 'btn-secondary';
+                        button.textContent = label;
+                        button.dataset.correctionInvoice = String(id);
+                        button.dataset.correctionSide = side;
+                        button.addEventListener('click', () => openCorrection(Number(id)));
+                        div.appendChild(button);
+                    }
                     list.appendChild(div);
                 });
         }
@@ -3066,6 +3190,8 @@
 
             const request = ++invoiceRequest;
             invoiceItems = null;
+            updateSearchSuggestions('invoiceNumberSuggestions', []);
+            updateSearchSuggestions('invoiceSupplierSuggestions', []);
             summary.textContent = 'Chargement du registre...';
             container.innerHTML = "<div style='text-align:center; padding:24px; color:var(--text-secondary);'>Chargement des factures...</div>";
 
@@ -3089,6 +3215,10 @@
                 const container = document.getElementById('invoicesListContainer');
                 const summary = document.getElementById('invoicesSummaryText');
                 const invoices = invoiceItems;
+                const number = document.getElementById('invoiceNumberSearch').value;
+                const supplier = document.getElementById('invoiceSupplierSearch').value;
+                updateSearchSuggestions('invoiceNumberSuggestions', searchSuggestions(filterInvoices(invoices, '', supplier), ['numero_facture'], number));
+                updateSearchSuggestions('invoiceSupplierSuggestions', searchSuggestions(filterInvoices(invoices, number, '').map(inv => ({emetteur: (inv.invoice_type || '').toUpperCase() === 'CLIENT' ? inv.emetteur_nom : inv.fournisseur_nom})), ['emetteur'], supplier));
                 if (invoices.length === 0) {
                     summary.innerText = "0 facture enregistrée en base";
                     container.innerHTML = `
@@ -3120,7 +3250,7 @@
                     const statusText = inv.status === 'VALIDE' ? 'Conforme' : (inv.status === 'DOUBLON' ? 'Doublon' : 'À vérifier');
                     const ttc = (typeof inv.montant_ttc === 'number') ? inv.montant_ttc.toFixed(2) + ' €' : (inv.montant_ttc || '-- €');
                     const ht = (typeof inv.montant_ht === 'number') ? inv.montant_ht.toFixed(2) + ' €' : (inv.montant_ht || '-- €');
-                    const tiers = inv.fournisseur_nom || inv.patient_nom || 'Tiers non spécifié';
+                    const tiers = isVendor ? (inv.fournisseur_nom || 'Fournisseur non identifié') : `Émetteur : ${inv.emetteur_nom || 'Non identifié'} · Marque client : Phoneme${inv.patient_nom ? ' · Patient : ' + inv.patient_nom : ''}`;
                     const numFact = inv.numero_facture || `Facture #${inv.id}`;
                     const dateFact = inv.date_facture || '--';
                     const serials = Array.isArray(inv.serial_numbers) ? inv.serial_numbers : [];
@@ -3191,7 +3321,9 @@
                 document.querySelectorAll('#correctionForm input').forEach(input => { input.disabled = false; });
                 document.getElementById('correctionSave').disabled = false;
                 document.getElementById('correctionSave').textContent = 'Vérifier les modifications';
-                document.getElementById('correctionSupplier').value = inv.fournisseur_nom || '';
+                document.getElementById('correctionSupplierLabel').textContent = inv.invoice_type === 'CLIENT' ? 'Émetteur client' : 'Fournisseur';
+                document.getElementById('correctionSupplier').value = (inv.invoice_type === 'CLIENT' ? inv.emetteur_nom : inv.fournisseur_nom) || '';
+                document.getElementById('correctionBrand').value = inv.marque_produit || '';
                 document.getElementById('correctionPatient').value = inv.patient_nom || '';
                 document.getElementById('correctionMessage').textContent = '';
                 const serials = Array.isArray(inv.serial_numbers) ? inv.serial_numbers : [];
@@ -3243,7 +3375,12 @@
             document.getElementById('correctionPreview').removeAttribute('src');
             document.getElementById('correctionModal').style.display = 'none';
             correctionInvoice = null;
-            if (correctionReturnFocus) correctionReturnFocus.focus();
+            if (correctionReturnFocus && correctionReturnFocus.isConnected) correctionReturnFocus.focus();
+            else {
+                const original = correctionReturnFocus;
+                const replacement = original && original.dataset.correctionInvoice && [...document.querySelectorAll('#recList button[data-correction-invoice]')].find(button => button.dataset.correctionInvoice === original.dataset.correctionInvoice && button.dataset.correctionSide === original.dataset.correctionSide);
+                (replacement || document.getElementById('recSearch')).focus();
+            }
         }
 
         function openFullEditFromCorrection() {
@@ -3268,7 +3405,7 @@
             const inv = correctionInvoice;
             const payload = {expected_revision: inv.revision};
             const changes = [];
-            for (const [field, id, label] of [['fournisseur_nom', 'correctionSupplier', 'Fournisseur'], ['patient_nom', 'correctionPatient', 'Patient']]) {
+            for (const [field, id, label] of [[inv.invoice_type === 'CLIENT' ? 'emetteur_nom' : 'fournisseur_nom', 'correctionSupplier', inv.invoice_type === 'CLIENT' ? 'Émetteur' : 'Fournisseur'], ['marque_produit', 'correctionBrand', 'Marque produit'], ['patient_nom', 'correctionPatient', 'Patient']]) {
                 const value = document.getElementById(id).value.trim();
                 if (value !== (inv[field] || '')) { payload[field] = value; changes.push(`${label} : ${inv[field] || '—'} → ${value || '—'}`); }
             }
@@ -3294,11 +3431,17 @@
                 correctionInvoice = {...data.invoice, source_documents: inv.source_documents};
                 correctionDirty = false;
                 const saved = correctionInvoice;
-                document.getElementById('correctionMessage').textContent = `Enregistré. Fournisseur : ${saved.fournisseur_nom || '—'} ; patient : ${saved.patient_nom || '—'} ; S/N : ${(saved.serial_numbers || []).join(', ') || '—'}. État de la facture : ${saved.status || 'à vérifier'}. ${saved.error_details || ''} ${(data.warnings || []).join(' ')}`;
-                await Promise.all([loadInvoicesList(), loadReconciliationData()]);
-                const matches = (reconciliationItems || []).filter(item => item.achat_invoice_id === inv.id || item.vente_invoice_id === inv.id);
-                const result = matches.length ? matches.map(item => `${item.match_method || 'À vérifier'} : ${item.diagnostic || ''}`).join(' ; ') : 'Aucun rapprochement disponible.';
-                document.getElementById('correctionMessage').textContent += ` Rapprochement actualisé : ${result}`;
+                document.getElementById('correctionMessage').textContent = `Enregistré. ${saved.invoice_type === 'CLIENT' ? 'Émetteur : ' + (saved.emetteur_nom || '—') + ' ; marque client : Phoneme' : 'Fournisseur : ' + (saved.fournisseur_nom || '—')} ; marque produit : ${saved.marque_produit || '—'} ; patient : ${saved.patient_nom || '—'} ; S/N : ${(saved.serial_numbers || []).join(', ') || '—'}. État de la facture : ${saved.status || 'à vérifier'}. ${saved.error_details || ''} ${(data.warnings || []).join(' ')}`;
+                const [registryResult, auditResult] = await Promise.allSettled([loadInvoicesList(), loadReconciliationData()]);
+                const auditUpdated = auditResult.status === 'fulfilled' && auditResult.value;
+                if (registryResult.status === 'rejected') document.getElementById('correctionMessage').textContent += ' Le registre doit être rechargé.';
+                if (auditUpdated) {
+                    const matches = (reconciliationItems || []).filter(item => item.achat_invoice_id === inv.id || item.vente_invoice_id === inv.id);
+                    const result = matches.length ? matches.map(item => `${item.match_method || 'À vérifier'} : ${item.diagnostic || ''}`).join(' ; ') : 'Aucun rapprochement disponible.';
+                    document.getElementById('correctionMessage').textContent += ` Rapprochement actualisé : ${result}`;
+                } else {
+                    document.getElementById('correctionMessage').textContent += ' La sauvegarde a réussi, mais l’audit n’a pas pu être actualisé : rechargez-le.';
+                }
                 // Recharger les champs et leurs associations avant une nouvelle correction.
                 document.querySelectorAll('#correctionForm input').forEach(input => { input.disabled = true; });
                 button.disabled = true;
@@ -3323,7 +3466,9 @@
                 document.getElementById('editDocumentType').value = (inv.document_type || 'FACTURE').toUpperCase();
                 document.getElementById('editNumFacture').value = inv.numero_facture || '';
                 document.getElementById('editDateFacture').value = inv.date_facture || '';
-                document.getElementById('editFournisseur').value = inv.fournisseur_nom || '';
+                document.getElementById('editFournisseur').value = inv.invoice_type === 'CLIENT' ? '' : (inv.fournisseur_nom || '');
+                document.getElementById('editEmitter').value = inv.emetteur_nom || '';
+                document.getElementById('editBrand').value = inv.marque_produit || '';
                 document.getElementById('editPatient').value = inv.patient_nom || '';
                 document.getElementById('editMontantHt').value = (inv.montant_ht !== null && inv.montant_ht !== undefined) ? inv.montant_ht : '';
                 document.getElementById('editMontantTva').value = (inv.montant_tva !== null && inv.montant_tva !== undefined) ? inv.montant_tva : '';
@@ -3383,6 +3528,8 @@
                 numero_facture: document.getElementById('editNumFacture').value.trim(),
                 date_facture: document.getElementById('editDateFacture').value.trim(),
                 fournisseur_nom: document.getElementById('editFournisseur').value.trim(),
+                emetteur_nom: document.getElementById('editEmitter').value.trim(),
+                marque_produit: document.getElementById('editBrand').value.trim(),
                 patient_nom: document.getElementById('editPatient').value.trim(),
                 montant_ht: htVal !== '' ? parseFloat(htVal) : null,
                 montant_tva: tvaVal !== '' ? parseFloat(tvaVal) : null,
@@ -3392,7 +3539,7 @@
                 product_items: parseProductItems(document.getElementById('editProductItems').value),
             };
 
-            const fields = {invoice_type:'editInvoiceType', document_type:'editDocumentType', related_invoice_id:'editRelatedInvoiceId', numero_facture:'editNumFacture', date_facture:'editDateFacture', fournisseur_nom:'editFournisseur', patient_nom:'editPatient', montant_ht:'editMontantHt', montant_tva:'editMontantTva', montant_ttc:'editMontantTtc', serial_numbers:'editSerialNumbers', product_names:'editProductNames', product_items:'editProductItems'};
+            const fields = {invoice_type:'editInvoiceType', document_type:'editDocumentType', related_invoice_id:'editRelatedInvoiceId', numero_facture:'editNumFacture', date_facture:'editDateFacture', fournisseur_nom:'editFournisseur', emetteur_nom:'editEmitter', marque_produit:'editBrand', patient_nom:'editPatient', montant_ht:'editMontantHt', montant_tva:'editMontantTva', montant_ttc:'editMontantTtc', serial_numbers:'editSerialNumbers', product_names:'editProductNames', product_items:'editProductItems'};
             Object.keys(payload).forEach(key => { if (fullEditInitial && document.getElementById(fields[key]).value === fullEditInitial[fields[key]]) delete payload[key]; });
             if (!Object.keys(payload).length) { closeEditModal(); return; }
             payload.expected_revision = fullEditRevision;

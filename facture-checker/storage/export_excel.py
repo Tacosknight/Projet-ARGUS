@@ -380,6 +380,9 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
         ("Observations / Détails", 40, "left", "@"),
         ("Fichier Source", 28, "left", "@"),
         ("Date Numérisation", 18, "center", "YYYY-MM-DD HH:MM"),
+        ("Émetteur client", 24, "left", "@"),
+        ("Marque client", 18, "left", "@"),
+        ("Marque produit", 18, "left", "@"),
     ]
 
     header_font = Font(name="Calibri", size=11, bold=True, color=COLOR_HEADER_FG)
@@ -445,6 +448,9 @@ def _build_detail_sheet(ws, invoices: List[Dict[str, Any]], border_all: Border) 
             error_text or "Conforme",
             inv.get("filename", ""),
             created_at_fmt,
+            inv.get("emetteur_nom") or "Non identifié" if raw_type == "CLIENT" else "-",
+            "Phoneme" if raw_type == "CLIENT" else "-",
+            inv.get("marque_produit") or "Non identifié",
         ]
 
         for col_idx, val in enumerate(row_values, start=1):

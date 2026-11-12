@@ -82,7 +82,7 @@ class TestComparator(unittest.TestCase):
             "montant_ttc": 16.23,
         }
         client = {
-            "fournisseur_nom": "Signia",
+            "marque_produit": "Signia",
             "patient_nom": "Martin Jean",
             "numero_facture": "350",
             "serial_numbers": ["208950"],
@@ -91,9 +91,17 @@ class TestComparator(unittest.TestCase):
         }
         res = compare_invoices(vendor, client)
         self.assertEqual(res["global_status"], STATUS_MATCH)
-        brand_row = next(r for r in res["rows"] if r["label"] == "Fabricant / Marque")
+        brand_row = next(r for r in res["rows"] if r["label"] == "Marque produit (diagnostic)")
         self.assertEqual(brand_row["status"], STATUS_WARNING)
         self.assertIn("WS Audiology", brand_row["detail"])
+
+    def test_historical_client_brand_is_not_a_product_brand(self):
+        result = compare_invoices({'fournisseur_nom': 'Signia'},
+                                  {'fournisseur_nom': 'Phoneme', 'invoice_type': 'CLIENT'})
+        rows = {row['label']: row for row in result['rows']}
+        self.assertEqual(rows['Marque client']['client_val'], 'Phoneme')
+        self.assertEqual(rows['Émetteur client']['client_val'], 'Non identifié')
+        self.assertEqual(rows['Marque produit (diagnostic)']['status'], STATUS_WARNING)
 
     def test_compare_patient_dual_match(self):
         vendor = {

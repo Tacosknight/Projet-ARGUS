@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import logging
 import os
+import time
 import cv2
 import numpy as np
 
@@ -129,7 +130,8 @@ class OCREngine:
         return self._ocr
 
     def extract_text_and_boxes(
-        self, image: Union[str, Path, np.ndarray], use_cache: bool = True
+        self, image: Union[str, Path, np.ndarray], use_cache: bool = True,
+        metrics: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Exécute la détection et reconnaissance de texte sur l'image donnée.
@@ -148,6 +150,8 @@ class OCREngine:
                     ...
                 ]
         """
+        if metrics is not None:
+            metrics.update(cache="disabled" if not use_cache else "miss", model_loaded=self._ocr is not None)
         # Chargement de l'image si un chemin est passé
         if isinstance(image, (str, Path)):
             img_path = str(image)
@@ -169,12 +173,22 @@ class OCREngine:
                 from core.ocr_cache import get_ocr_cache
                 cached = get_ocr_cache().get(img)
                 if cached is not None:
+                    if metrics is not None:
+                        metrics.update(cache="hit", blocks=len(cached))
                     return cached
-            except Exception as e_cache:
-                logger.debug("Erreur lors de la lecture du cache OCR : %s", e_cache)
+            except Exception:
+                if metrics is not None:
+                    metrics["cache"] = "error"
+                logger.debug("Erreur lors de la lecture du cache OCR")
 
-        ocr_instance = self._get_ocr()
+        started = time.perf_counter()
+        try:
+            ocr_instance = self._get_ocr()
+        finally:
+            if metrics is not None:
+                metrics["model_seconds"] = time.perf_counter() - started
 
+        started = time.perf_counter()
         try:
             # Exécution de PaddleOCR (compatible v2.x et v3.x / PaddleX)
             if hasattr(ocr_instance, "predict"):
@@ -187,6 +201,9 @@ class OCREngine:
             except Exception as exc2:
                 logger.error("Échec de l'inférence PaddleOCR (%s).", type(exc2).__name__)
                 raise OCRInferenceError("L'inférence OCR a échoué.") from exc2
+        finally:
+            if metrics is not None:
+                metrics["inference_seconds"] = time.perf_counter() - started
 
         # Gestion des résultats vides
         if not raw_results:
@@ -254,6 +271,8 @@ class OCREngine:
             except Exception as e_cache:
                 logger.debug("Erreur lors de l'enregistrement dans le cache OCR : %s", e_cache)
 
+        if metrics is not None:
+            metrics["blocks"] = len(formatted_lines)
         return formatted_lines
 
 

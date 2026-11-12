@@ -186,7 +186,9 @@ def compare_invoices(
 
     # 1. Fabricant / Marque / Tiers
     v_fourn = (vendor_doc.get("fournisseur_nom") or "").strip()
-    c_fourn = (client_doc.get("fournisseur_nom") or "").strip()
+    c_fourn = (client_doc.get("marque_produit") or "").strip()
+    if c_fourn.lower() == "mixte":
+        c_fourn = ""
     c_patient = (client_doc.get("patient_nom") or "").strip()
 
     # Groupes industriels de fabricants d'aides auditives
@@ -230,13 +232,23 @@ def compare_invoices(
         brand_detail = "Fabricant non spécifié textuellement"
 
     rows.append({
-        "label": "Fabricant / Marque",
+        "label": "Marque produit (diagnostic)",
         "category": "tiers",
         "vendor_val": v_fourn or "Non identifié",
-        "client_val": c_fourn or (f"Patient : {c_patient}" if c_patient else "Non identifié"),
+        "client_val": client_doc.get("marque_produit") or "Non identifié",
         "status": brand_status,
         "detail": brand_detail,
     })
+
+    rows.extend([
+        {"label": "Émetteur client", "category": "tiers", "vendor_val": "—",
+         "client_val": client_doc.get("emetteur_nom") or "Non identifié",
+         "status": STATUS_MATCH if client_doc.get("emetteur_nom") else STATUS_WARNING,
+         "detail": "Émetteur de la facture client"},
+        {"label": "Marque client", "category": "tiers", "vendor_val": "—",
+         "client_val": "Phoneme", "status": STATUS_MATCH,
+         "detail": "Marque métier client, distincte de la marque produit"},
+    ])
 
     v_patient = (vendor_doc.get("patient_nom") or "").strip()
     if v_patient or c_patient:

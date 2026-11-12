@@ -104,13 +104,25 @@ class InvoiceDatabase:
             if "patient_nom" not in existing_cols:
                 cursor.execute("ALTER TABLE invoices ADD COLUMN patient_nom TEXT;")
 
+            for column in ("emetteur_nom", "marque_produit"):
+                if column not in existing_cols:
+                    cursor.execute(f"ALTER TABLE invoices ADD COLUMN {column} TEXT;")
+
             # Indexations pour accélérer la recherche d'unicité, les types et les filtres
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_hash ON invoices(unique_hash);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_siret ON invoices(siret);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_type ON invoices(invoice_type);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_invoices_related ON invoices(related_invoice_id);")
+            cursor.execute("""CREATE TABLE IF NOT EXISTS direct_comparison_uploads (
+                fingerprint TEXT PRIMARY KEY, invoice_id INTEGER NOT NULL
+            )""")
             conn.commit()
+
+    def get_direct_upload(self, fingerprint: str) -> Optional[Dict[str, Any]]:
+        with DATA_LOCK, closing(self.get_connection()) as conn:
+            row = conn.execute("SELECT invoice_id FROM direct_comparison_uploads WHERE fingerprint = ?", (fingerprint,)).fetchone()
+            return self.get_invoice_by_id(row[0]) if row else None
 
     def is_hash_exists(self, unique_hash: str) -> bool:
         """
@@ -184,6 +196,8 @@ class InvoiceDatabase:
                     montant_ttc,
                     tva_intracommunautaire,
                     fournisseur_nom,
+                    emetteur_nom,
+                    marque_produit,
                     patient_nom,
                     serial_numbers,
                     product_names,
@@ -194,7 +208,7 @@ class InvoiceDatabase:
                     created_at,
                     raw_text,
                     source_documents
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(unique_hash) DO UPDATE SET
                     filename = excluded.filename,
                     invoice_type = excluded.invoice_type,
@@ -210,6 +224,8 @@ class InvoiceDatabase:
                     product_items = excluded.product_items,
                     source_documents = excluded.source_documents,
                     patient_nom = excluded.patient_nom,
+                    emetteur_nom = COALESCE(invoices.emetteur_nom, excluded.emetteur_nom),
+                    marque_produit = COALESCE(invoices.marque_produit, excluded.marque_produit),
                     created_at = excluded.created_at,
                     raw_text = excluded.raw_text;
                 """,
@@ -227,6 +243,8 @@ class InvoiceDatabase:
                     data.get("montant_ttc"),
                     data.get("tva_intracommunautaire"),
                     data.get("fournisseur_nom"),
+                    data.get("emetteur_nom"),
+                    data.get("marque_produit"),
                     data.get("patient_nom") or data.get("client_nom"),
                     serial_numbers_str,
                     product_names_str,
@@ -239,8 +257,12 @@ class InvoiceDatabase:
                     json.dumps(data.get("source_documents", []), ensure_ascii=False),
                 ),
             )
+            invoice_id = cursor.lastrowid or 0
+            if data.get("direct_upload_fingerprint"):
+                cursor.execute("INSERT INTO direct_comparison_uploads (fingerprint, invoice_id) VALUES (?, ?) ON CONFLICT(fingerprint) DO UPDATE SET invoice_id = excluded.invoice_id",
+                               (data["direct_upload_fingerprint"], invoice_id))
             conn.commit()
-            return cursor.lastrowid or 0
+            return invoice_id
 
     def get_all_invoices(self) -> List[Dict[str, Any]]:
         """Retourne toutes les factures ordonnées par ID croissant."""
@@ -251,6 +273,7 @@ class InvoiceDatabase:
             results = []
             for row in rows:
                 item = dict(row)
+                item["marque_client"] = "Phoneme" if (item.get("invoice_type") or "").upper() == "CLIENT" else None
                 item["source_documents"] = json.loads(item.get("source_documents") or "[]")
                 if item.get("serial_numbers"):
                     try:
@@ -288,6 +311,7 @@ class InvoiceDatabase:
             results = []
             for row in rows:
                 item = dict(row)
+                item["marque_client"] = "Phoneme" if (item.get("invoice_type") or "").upper() == "CLIENT" else None
                 item["source_documents"] = json.loads(item.get("source_documents") or "[]")
                 if item.get("serial_numbers"):
                     try:
@@ -317,6 +341,7 @@ class InvoiceDatabase:
                 return None
             item = dict(row)
             item["revision"] = invoice_revision(item)
+            item["marque_client"] = "Phoneme" if (item.get("invoice_type") or "").upper() == "CLIENT" else None
             item["source_documents"] = json.loads(item.get("source_documents") or "[]")
             if item.get("serial_numbers"):
                 try:
@@ -341,7 +366,7 @@ class InvoiceDatabase:
         import math
 
         allowed = {"numero_facture", "date_facture", "montant_ht", "montant_tva", "montant_ttc",
-                   "fournisseur_nom", "patient_nom", "invoice_type", "document_type", "related_invoice_id",
+                   "fournisseur_nom", "emetteur_nom", "marque_produit", "patient_nom", "invoice_type", "document_type", "related_invoice_id",
                    "serial_numbers", "product_names", "product_items", "siret", "siren", "tva_intracommunautaire"}
         if not updates or set(updates) - allowed:
             raise ValueError("Champs de mise à jour invalides.")

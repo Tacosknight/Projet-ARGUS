@@ -151,6 +151,10 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
             fournisseur_nom = p["fournisseur_nom"]
             break
 
+    brands = {p.get("marque_produit") for p in sorted_pages if p.get("marque_produit")}
+    marque_produit = next(iter(brands)) if len(brands) == 1 else ("Mixte" if brands else None)
+    emetteur_nom = next((p.get("emetteur_nom") for p in sorted_pages if p.get("emetteur_nom")), None)
+
     # Patient
     patient_nom = None
     for p in sorted_pages:
@@ -243,6 +247,9 @@ def consolidate_pages(pages: List[Dict[str, Any]]) -> Dict[str, Any]:
         "montant_ttc": montant_ttc,
         "tva_intracommunautaire": tva_intra,
         "fournisseur_nom": fournisseur_nom,
+        "emetteur_nom": emetteur_nom,
+        "marque_produit": marque_produit,
+        "marque_client": "Phoneme" if invoice_type == "CLIENT" else None,
         "patient_nom": patient_nom,
         "serial_numbers": sorted(list(all_serials)),
         "product_names": all_product_names,

@@ -1065,6 +1065,29 @@ class InvoiceParser:
                     return text
         return None
 
+    def extract_client_issuer(self) -> Optional[str]:
+        # Uniquement un libellé explicite ou une enseigne Phonème en en-tête.
+        lines = [line.strip() for line in self.full_text.splitlines() if line.strip()]
+        for line in lines:
+            match = re.match(r"^(?:[eé]metteur|vendeur|raison sociale)\s*:\s*(.+)$", line, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        for line in lines[:5]:
+            if re.match(r"^phon[eè]me(?:\s+(?:audition|audio))?$", line, re.IGNORECASE):
+                return line
+        return None
+
+    def extract_product_brand(self) -> Optional[str]:
+        # Mentions explicites seulement, sans déduire la marque depuis le modèle.
+        brands = {canonical for pattern, canonical in [
+            (r"\bsignia\b", "Signia"), (r"\bphonak\b", "Phonak"),
+            (r"\bwidex\b", "Widex"), (r"\boticon\b", "Oticon"),
+            (r"\bbernafon\b", "Bernafon"), (r"\bresound\b", "ReSound"),
+            (r"\bstarkey\b", "Starkey"), (r"\bunitron\b", "Unitron"),
+            (r"\bhansaton\b", "Hansaton"),
+        ] if re.search(pattern, self.full_text, re.IGNORECASE)}
+        return next(iter(brands)) if len(brands) == 1 else ("Mixte" if brands else None)
+
     def detect_page_info(self) -> Tuple[int, int]:
         # Formats explicites multi-pages : "Page No 1 de 11", "Page 1 sur 2", "Page 1/2", "1 / 11"
         patterns = [
@@ -1215,6 +1238,9 @@ class InvoiceParser:
             "montant_tva": tva,
             "montant_ttc": ttc,
             "fournisseur_nom": fournisseur,
+            "emetteur_nom": self.extract_client_issuer() if inv_type == "CLIENT" else None,
+            "marque_client": "Phoneme" if inv_type == "CLIENT" else None,
+            "marque_produit": self.extract_product_brand(),
             "patient_nom": patient,
             "serial_numbers": serials,
             "product_names": product_names,

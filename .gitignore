@@ -58,3 +58,4 @@ build/
 dist/
 .venv-build-windows/
 *.spec.bak
+.aider*
