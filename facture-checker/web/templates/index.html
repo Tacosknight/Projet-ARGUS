@@ -707,7 +707,16 @@
         #compareResultBox .kpi-mini-card { text-align: left; padding: 14px; overflow-wrap: anywhere; }
         #compareResultBox .kpi-mini-val { color: var(--text-primary); }
         #compareResultBox .compare-table { min-width: 600px; }
-        #compareResultBox .compare-table td { overflow-wrap: anywhere; }
+        #compareResultBox .compare-table td, #groupedCompareResult .compare-table td { overflow-wrap: anywhere; }
+        #groupedCompareResult .compare-table { min-width: 600px; }
+        #groupedCompareResult h2, #groupedCompareResult h3 { margin: 18px 0 10px; color: var(--text-primary); }
+        #groupedCompareResult h2:first-child { margin-top: 0; }
+        #groupedCompareResult p { line-height: 1.5; overflow-wrap: anywhere; }
+        #compareResultBox, #groupedCompareResult { scroll-margin-top: 20px; min-width: 0; }
+        .sn-product-badge { opacity: .88; font-size: .71rem; background: rgba(255,255,255,.7); padding: 1px 5px; border-radius: 4px; margin-left: 4px; font-weight: 600; }
+        .compare-table th { overflow-wrap: anywhere; }
+        .table-container:focus-visible { outline: 3px solid var(--primary-deep); outline-offset: 2px; }
+        #extraClientGroups .upload-zone-card { margin: 12px 0; }
         @media (max-width: 600px) { #compareResultBox .compare-kpi-grid { grid-template-columns: 1fr; } }
 
         .badge-status {
@@ -1571,6 +1580,7 @@
 
         <!-- SECTION 1 : MODE COMPARATEUR 2 FACTURES (ACTIF PAR DÉFAUT) -->
         <div id="sectionCompare">
+            <fieldset id="comparisonInputs" style="border:0;padding:0;margin:0;min-width:0">
             <div class="dual-upload-grid">
                 <!-- Zone 1 : Facture Fournisseur (Achat) -->
                 <div class="upload-zone-card zone-vendor" id="vendorDropZone">
@@ -1663,7 +1673,7 @@
                 <div id="extraClientGroups"></div>
                 <button type="button" class="btn-secondary" onclick="addClientGroup()">Ajouter une facture client</button>
             </div>
-            <div id="groupedCompareResult" class="card" style="display:none; margin-top:12px; padding:14px;" aria-live="polite"></div>
+            </fieldset>
 
             <!-- Bouton d'action principal -->
             <button id="btnLaunchCompare" class="btn-launch-compare" onclick="uploadAndCompare()">
@@ -1677,6 +1687,8 @@
                 <div id="compareLoadingStep" class="step-label">Analyse en cours…</div>
             </div>
         </div>
+
+        <div id="groupedCompareResult" class="card" style="display:none; margin-top:12px; padding:18px;" aria-live="polite"></div>
 
         <!-- SECTION 2 : RÉSULTAT COMPARATIF 2 COLONNES -->
         <div id="compareResultBox" class="card result-box">
@@ -1718,7 +1730,7 @@
             </div>
 
             <!-- Tableau comparatif 2 colonnes alignées -->
-            <div class="table-container">
+            <div class="table-container" tabindex="0" role="region" aria-label="Tableau des données comparées, défilement horizontal si nécessaire">
                 <table class="compare-table">
                     <thead>
                         <tr>
@@ -2177,6 +2189,7 @@
                 sectionCompare.style.display = 'none';
                 sectionSingleScan.style.display = 'block';
                 compareResultBox.style.display = 'none';
+                document.getElementById('groupedCompareResult').style.display = 'none';
             }
         }
 
@@ -2296,6 +2309,7 @@
 
             grid.innerHTML = "";
             const count = vendorFiles.length;
+            cleanupDocumentPreviewUrls();
             badge.innerText = count + (count > 1 ? " pages" : " page");
 
             if (count === 0) {
@@ -2347,6 +2361,17 @@
             updateCompareButton();
         }
 
+        function cleanupDocumentPreviewUrls() {
+            if (!window.documentPreviewUrls) return;
+            const active = [...vendorFiles, ...clientFiles, ...singleFiles, ...extraClientGroups.flatMap(group => group.files)];
+            for (const [file, url] of window.documentPreviewUrls) {
+                if (!active.includes(file)) {
+                    URL.revokeObjectURL(url);
+                    window.documentPreviewUrls.delete(file);
+                }
+            }
+        }
+
         function addDocumentPreview(card, file) {
             // Le fichier reste local avant l'analyse ; le lien est révoqué au
             // remplacement de la sélection pour ne pas conserver ses octets.
@@ -2356,12 +2381,7 @@
                 url = URL.createObjectURL(file);
                 window.documentPreviewUrls.set(file, url);
             }
-            for (const [oldFile, oldUrl] of window.documentPreviewUrls) {
-                if (![...vendorFiles, ...clientFiles, ...singleFiles].includes(oldFile)) {
-                    URL.revokeObjectURL(oldUrl);
-                    window.documentPreviewUrls.delete(oldFile);
-                }
-            }
+            cleanupDocumentPreviewUrls();
             const link = document.createElement('a');
             link.href = url;
             link.target = '_blank';
@@ -2408,6 +2428,7 @@
 
             grid.innerHTML = "";
             const count = clientFiles.length;
+            cleanupDocumentPreviewUrls();
             badge.innerText = count + (count > 1 ? " pages" : " page");
 
             if (count === 0) {
@@ -2479,19 +2500,88 @@
         // ==========================================
         // ANALYSE & COMPARAISON DIRECTE 2 FACTURES
         // ==========================================
+        const extraClientGroups = [];
+
+        function renderExtraClientGroup(group) {
+            const { card, files } = group;
+            const grid = card.querySelector('.zone-preview-grid');
+            const badge = card.querySelector('.zone-badge');
+            const addRow = card.querySelector('.extra-add-row');
+            grid.replaceChildren();
+            badge.textContent = `${files.length} ${files.length > 1 ? 'pages' : 'page'}`;
+            grid.style.display = files.length ? 'flex' : 'none';
+            addRow.style.display = files.length ? 'flex' : 'none';
+            cleanupDocumentPreviewUrls();
+            files.forEach((file, index) => {
+                const preview = document.createElement('div');
+                preview.className = 'preview-card';
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    const pdf = document.createElement('div');
+                    pdf.style.cssText = 'padding:20px;color:var(--audit-error);font-weight:700';
+                    pdf.textContent = 'PDF';
+                    preview.appendChild(pdf);
+                } else {
+                    const image = document.createElement('img');
+                    const reader = new FileReader();
+                    reader.onload = event => { image.src = event.target.result; };
+                    reader.readAsDataURL(file);
+                    preview.appendChild(image);
+                }
+                const badge = document.createElement('div');
+                badge.className = 'page-badge'; badge.textContent = `P. ${index + 1}`;
+                const remove = document.createElement('button');
+                remove.type = 'button'; remove.className = 'btn-remove-page';
+                remove.setAttribute('aria-label', 'Supprimer cette page'); remove.textContent = '×';
+                remove.onclick = () => { files.splice(index, 1); renderExtraClientGroup(group); };
+                preview.append(badge, remove);
+                addDocumentPreview(preview, file);
+                grid.appendChild(preview);
+            });
+        }
+
         function addClientGroup() {
-            const group = document.createElement('div');
-            group.style.cssText = 'margin:10px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center';
-            const label = document.createElement('label');
-            label.textContent = 'Pages de la facture client supplémentaire ';
-            const input = document.createElement('input');
-            input.type = 'file'; input.multiple = true; input.accept = 'image/*,.pdf,application/pdf';
-            label.appendChild(input);
-            const remove = document.createElement('button');
-            remove.type = 'button'; remove.className = 'btn-secondary'; remove.textContent = 'Supprimer ce groupe';
-            remove.onclick = () => group.remove();
-            group.append(label, remove);
-            document.getElementById('extraClientGroups').appendChild(group);
+            const card = document.createElement('div');
+            card.className = 'upload-zone-card zone-client';
+            card.innerHTML = `<div class="zone-header"><div class="zone-title">Facture client supplémentaire</div><div class="zone-badge badge-client">0 page</div></div>
+                <div class="zone-subtitle">Une facture distincte, composée d’une ou plusieurs pages</div>
+                <div class="drop-target-hint">Glisser-déposer un PDF ou une image ici</div>
+                <div class="zone-btn-row"><button type="button" class="btn-zone-capture btn-client extra-photo">Photo</button><button type="button" class="btn-zone-import extra-import">Importer</button></div>
+                <input class="hidden-input extra-camera" type="file" accept="image/*" capture="environment">
+                <input class="hidden-input extra-file" type="file" accept="image/*,.pdf,application/pdf" multiple>
+                <div class="zone-preview-grid" style="display:none"></div>
+                <div class="extra-add-row" style="display:none;gap:6px;margin-top:6px"><button type="button" class="btn-zone-add-page extra-add-photo">+ Photo</button><button type="button" class="btn-zone-add-page extra-add-file">+ Fichier / PDF</button></div>
+                <input class="hidden-input extra-camera-add" type="file" accept="image/*" capture="environment">
+                <input class="hidden-input extra-file-add" type="file" accept="image/*,.pdf,application/pdf" multiple>
+                <button type="button" class="btn-secondary extra-remove" style="margin-top:10px">Supprimer cette facture</button>`;
+            const group = { card, files: [] };
+            extraClientGroups.push(group);
+            const bindInput = (buttonSelector, inputSelector, append) => {
+                const input = card.querySelector(inputSelector);
+                card.querySelector(buttonSelector).onclick = () => input.click();
+                input.onchange = () => {
+                    const selected = Array.from(input.files).filter(isAcceptedFile);
+                    if (selected.length) {
+                        if (!append) group.files.length = 0;
+                        group.files.push(...selected);
+                        renderExtraClientGroup(group);
+                    }
+                    input.value = '';
+                };
+            };
+            bindInput('.extra-photo', '.extra-camera', false);
+            bindInput('.extra-import', '.extra-file', false);
+            bindInput('.extra-add-photo', '.extra-camera-add', true);
+            bindInput('.extra-add-file', '.extra-file-add', true);
+            card.querySelector('.extra-remove').onclick = () => {
+                extraClientGroups.splice(extraClientGroups.indexOf(group), 1);
+                card.remove(); cleanupDocumentPreviewUrls();
+            };
+            attachDropZone(card, files => {
+                const valid = Array.from(files).filter(isAcceptedFile);
+                if (!valid.length) { alert('Format non supporté. Veuillez déposer un fichier PDF ou une image (JPG, PNG).'); return; }
+                group.files.push(...valid); renderExtraClientGroup(group);
+            });
+            document.getElementById('extraClientGroups').appendChild(card);
         }
 
         function groupedInvoiceLabel(number, id, missingLabel) {
@@ -2507,55 +2597,62 @@
         }
 
         async function uploadGroupedComparison() {
-            const groups = [...document.querySelectorAll('#extraClientGroups input[type=file]')];
-            if (groups.some(input => !input.files.length)) { showCompareError('Ajoutez des fichiers à chaque groupe ou supprimez le groupe vide.'); return; }
+            const groups = extraClientGroups.map(group => [...group.files]);
+            if (groups.some(files => !files.length)) { showCompareError('Ajoutez des fichiers à chaque groupe ou supprimez le groupe vide.'); return; }
             const data = new FormData();
             vendorFiles.forEach(file => data.append('vendor_files', file));
             clientFiles.forEach(file => data.append('client_0', file));
-            groups.forEach((input, index) => [...input.files].forEach(file => data.append(`client_${index + 1}`, file)));
+            groups.forEach((files, index) => files.forEach(file => data.append(`client_${index + 1}`, file)));
             const btn = document.getElementById('btnLaunchCompare');
             const box = document.getElementById('groupedCompareResult');
             document.getElementById('compareResultBox').style.display = 'none';
             box.style.display = 'block'; box.textContent = 'Analyse des factures en cours…'; btn.disabled = true;
+            document.getElementById('comparisonInputs').disabled = true;
             try {
                 const response = await fetch('/api/compare-grouped', { method: 'POST', body: data });
                 const result = await readApiResponse(response, 'Échec de la comparaison.');
                 box.replaceChildren();
-                const heading = document.createElement('h3'); heading.textContent = result.complete ? 'Rapprochement du dossier' : 'Dossier incomplet : reprendre après correction des échecs'; box.appendChild(heading);
-                result.groups.forEach(group => {
+                const heading = document.createElement('h2'); heading.textContent = result.complete ? 'Rapprochement du dossier' : 'Dossier incomplet : reprendre après correction des échecs'; box.appendChild(heading);
+                (Array.isArray(result.groups) ? result.groups : []).forEach(group => {
                     const line = document.createElement('p');
-                    line.textContent = `${group.group} : ${group.status}${group.invoice_id ? ` — facture enregistrée n° ${group.invoice_id}${group.reused ? ' (réutilisée)' : ''}` : ''}${group.error ? ` — ${group.error}` : ''}`;
+                    line.textContent = `${group.group ?? 'Groupe'} : ${group.status ?? 'Statut inconnu'}${group.invoice_id ? ` — facture enregistrée n° ${group.invoice_id}${group.reused ? ' (réutilisée)' : ''}` : ''}${group.error ? ` — ${group.error}` : ''}`;
                     box.appendChild(line);
                 });
-                (result.warnings || []).forEach(warning => { const p = document.createElement('p'); p.textContent = warning; box.appendChild(p); });
+                (Array.isArray(result.warnings) ? result.warnings : []).forEach(warning => { const p = document.createElement('p'); p.textContent = warning; box.appendChild(p); });
                 if (result.complete) {
                     const totals = result.totaux_clients;
                     if (totals) {
-                        const title = document.createElement('h4'); title.textContent = 'Totaux TTC documentaires des factures client'; box.appendChild(title);
-                        totals.factures.forEach(invoice => {
+                        const title = document.createElement('h3'); title.textContent = 'Totaux TTC documentaires des factures client'; box.appendChild(title);
+                        (Array.isArray(totals.factures) ? totals.factures : []).forEach(invoice => {
                             const line = document.createElement('p');
-                            const amount = invoice.montant_ttc == null ? 'Montant TTC manquant — à vérifier' : `${invoice.montant_ttc.toFixed(2)} €`;
-                            line.textContent = `${groupedInvoiceLabel(invoice.numero_facture, invoice.invoice_id, invoice.filename || 'Facture sans numéro')} : ${amount}`;
-                            box.appendChild(line);
+                            line.textContent = `${groupedInvoiceLabel(invoice.numero_facture, invoice.invoice_id, invoice.filename || 'Facture sans numéro')} : ${formatCompareAmount(invoice.montant_ttc, 'Montant TTC manquant — à vérifier')}`; box.appendChild(line);
                         });
                         const sum = document.createElement('p');
-                        sum.textContent = `${totals.complet ? 'Somme TTC' : 'Somme TTC partielle (montant manquant)'} : ${totals.total_connu_ttc.toFixed(2)} € — ${totals.nombre_factures} facture(s), ${totals.montants_manquants} montant(s) manquant(s). Totaux documentaires, non répartis par appareil ; avoirs exclus.`;
-                        box.appendChild(sum);
+                        sum.textContent = `${totals.complet ? 'Somme TTC' : 'Somme TTC partielle (montant manquant)'} : ${formatCompareAmount(totals.total_connu_ttc)} — ${totals.nombre_factures ?? '—'} facture(s), ${totals.montants_manquants ?? '—'} montant(s) manquant(s). Totaux documentaires, non répartis par appareil ; avoirs exclus.`; box.appendChild(sum);
                     }
-                    const table = document.createElement('table'); table.className = 'compare-table';
-                    const header = document.createElement('tr');
-                    ['Achat', 'Vente', 'N° série', 'Méthode', 'Statut / diagnostic'].forEach(text => { const th = document.createElement('th'); th.textContent = text; header.appendChild(th); });
-                    table.appendChild(header);
-                    (result.reconciliation.items || []).forEach(item => {
-                        const row = document.createElement('tr');
-                        [groupedInvoiceLabel(item.achat_num_facture, item.achat_invoice_id, 'Sans achat'), groupedInvoiceLabel(item.vente_num_facture, item.vente_invoice_id, 'En attente'), item.serial_number, item.match_method, `${item.status} — ${item.diagnostic}`].forEach(value => { const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell); });
-                        table.appendChild(row);
-                    });
-                    box.appendChild(table);
+                    const title = document.createElement('h3'); title.textContent = 'Rapprochement par appareil'; box.appendChild(title);
+                    const items = result.reconciliation && Array.isArray(result.reconciliation.items) ? result.reconciliation.items : [];
+                    if (!items.length) {
+                        const empty = document.createElement('p'); empty.textContent = 'Aucun rapprochement par appareil disponible.'; box.appendChild(empty);
+                    } else {
+                        const wrapper = document.createElement('div'); wrapper.className = 'table-container'; wrapper.tabIndex = 0; wrapper.setAttribute('role', 'region'); wrapper.setAttribute('aria-label', 'Rapprochement par appareil, défilement horizontal si nécessaire');
+                        const table = document.createElement('table'); table.className = 'compare-table';
+                        const thead = document.createElement('thead'); const header = document.createElement('tr');
+                        ['Achat', 'Vente', 'N° série', 'Méthode', 'Statut / diagnostic'].forEach(text => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = text; header.appendChild(th); });
+                        thead.appendChild(header); table.appendChild(thead);
+                        const body = document.createElement('tbody');
+                        items.forEach(item => {
+                            const row = document.createElement('tr');
+                            [groupedInvoiceLabel(item.achat_num_facture, item.achat_invoice_id, 'Sans achat'), groupedInvoiceLabel(item.vente_num_facture, item.vente_invoice_id, 'En attente'), item.serial_number, item.match_method, `${item.status ?? 'Statut inconnu'} — ${item.diagnostic ?? '—'}`].forEach(value => { const cell = document.createElement('td'); cell.textContent = value ?? '—'; row.appendChild(cell); });
+                            body.appendChild(row);
+                        });
+                        table.appendChild(body); wrapper.appendChild(table); box.appendChild(wrapper);
+                    }
                 }
+                box.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 updateInvoiceCountBadge();
             } catch (err) { box.textContent = `Erreur : ${err.message}. Relancez sans modifier les groupes déjà enregistrés.`; }
-            finally { btn.disabled = false; }
+            finally { btn.disabled = false; document.getElementById('comparisonInputs').disabled = false; }
         }
 
         async function uploadAndCompare() {
@@ -2569,7 +2666,7 @@
                 return;
             }
 
-            if (document.querySelector('#extraClientGroups input[type=file]')) {
+            if (extraClientGroups.length) {
                 await uploadGroupedComparison();
                 return;
             }
@@ -2582,6 +2679,7 @@
             loadingBox.style.display = 'block';
             resultBox.style.display = 'none';
             btn.disabled = true;
+            document.getElementById('comparisonInputs').disabled = true;
 
             const started = Date.now();
             const updateElapsed = () => { loadingStep.textContent = `Analyse en cours… ${Math.floor((Date.now() - started) / 1000)} s`; };
@@ -2608,6 +2706,7 @@
                 clearInterval(interval);
                 loadingBox.style.display = 'none';
                 btn.disabled = false;
+                document.getElementById('comparisonInputs').disabled = false;
             }
         }
 
@@ -2643,6 +2742,12 @@
             details.textContent = parts.join(' · ');
         }
 
+        function formatCompareAmount(value, fallback = '-- €', signed = false) {
+            if ((typeof value !== 'number' && typeof value !== 'string') || (typeof value === 'string' && !value.trim())) return fallback;
+            const number = Number(value);
+            return Number.isFinite(number) ? `${signed && number > 0 ? '+' : ''}${number.toFixed(2)} €` : fallback;
+        }
+
         function renderComparisonResult(data) {
             showExtractionPages(document.getElementById('compareResultBox'), [['Fournisseur', data.vendor_extraction_pages], ['Client', data.client_extraction_pages]]);
             showArchivedDocuments(document.getElementById('compareResultBox'), [
@@ -2655,7 +2760,8 @@
             const text = document.getElementById('compareStatusText');
             const summaryText = document.getElementById('compareSummaryText');
 
-            const status = (data.global_status || "WARNING").toUpperCase();
+            const rows = Array.isArray(data.rows) ? data.rows : [];
+            const status = rows.length && typeof data.global_status === 'string' ? data.global_status.toUpperCase() : 'WARNING';
             badge.className = "badge-status";
 
             if (status === "MATCH") {
@@ -2674,7 +2780,6 @@
 
             summaryText.innerText = data.summary || "Rapprochement effectué.";
 
-            const rows = data.rows || [];
             const review = document.getElementById('compareReviewContent');
             review.replaceChildren();
             const reviewRows = rows.filter(r => r.status === 'ERROR' || r.status === 'WARNING')
@@ -2702,122 +2807,52 @@
             const cTtc = cDoc.montant_ttc;
             const margin = data.ecart_ttc;
 
-            document.getElementById('compareVendorTtc').innerText = vTtc !== null && vTtc !== undefined ? vTtc.toFixed(2) + " €" : "-- €";
-            document.getElementById('compareClientTtc').innerText = cTtc !== null && cTtc !== undefined ? cTtc.toFixed(2) + " €" : "-- €";
-
+            document.getElementById('compareVendorTtc').innerText = formatCompareAmount(vTtc);
+            document.getElementById('compareClientTtc').innerText = formatCompareAmount(cTtc);
             const marginVal = document.getElementById('compareMarginVal');
-            marginVal.innerText = margin !== null && margin !== undefined
-                ? (margin > 0 ? "+" : "") + margin.toFixed(2) + " €"
-                : "-- €";
+            marginVal.innerText = formatCompareAmount(margin, '-- €', true);
             marginVal.style.color = "";
 
             // Remplissage du tableau 2 colonnes
             const tbody = document.getElementById('compareTableBody');
-            tbody.innerHTML = "";
-
+            tbody.replaceChildren();
+            if (!rows.length) {
+                const row = document.createElement('tr'); const cell = document.createElement('td'); cell.colSpan = 3;
+                cell.textContent = 'Aucune donnée comparée disponible. Vérifiez les factures.'; row.appendChild(cell); tbody.appendChild(row);
+            }
             rows.forEach(r => {
-                const tr = document.createElement('tr');
-                tr.className = "compare-row";
-
-                let cellClass = "cell-match";
-                let pillClass = "pill-match";
-                let pillIconSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><polyline points="20 6 9 17 4 12"/></svg>`;
-
-                if (r.status === "ERROR") {
-                    cellClass = "cell-error";
-                    pillClass = "pill-error";
-                    pillIconSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-                } else if (r.status === "WARNING") {
-                    cellClass = "cell-warning";
-                    pillClass = "pill-warning";
-                    pillIconSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
+                const tr = document.createElement('tr'); tr.className = 'compare-row';
+                const state = r.status === 'ERROR' ? 'error' : r.status === 'WARNING' ? 'warning' : 'match';
+                const label = document.createElement('td'); label.className = 'row-info-cell';
+                const name = document.createElement('div'); name.style.fontWeight = '700'; name.style.fontSize = '0.88rem'; name.textContent = r.label ?? 'Donnée'; label.appendChild(name);
+                if (r.detail) {
+                    const pill = document.createElement('div'); pill.className = `row-detail-pill pill-${state}`;
+                    pill.innerHTML = state === 'match' ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><polyline points="20 6 9 17 4 12"/></svg>' : state === 'warning' ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>' : '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+                    const detail = document.createElement('span'); detail.textContent = ` ${r.detail}`; pill.appendChild(detail); label.appendChild(pill);
                 }
-
-                // Colonne 1 : Intitulé de la ligne + diagnostic
-                const tdLabel = document.createElement('td');
-                tdLabel.className = "row-info-cell";
-                tdLabel.innerHTML = `
-                    <div style="font-weight: 700; font-size: 0.88rem;">${r.label}</div>
-                    ${r.detail ? `<div class="row-detail-pill ${pillClass}">${pillIconSvg} ${r.detail}</div>` : ''}
-                `;
-                tr.appendChild(tdLabel);
-
-                // Colonne 2 : Donnée Fournisseur
-                const tdVendor = document.createElement('td');
-                tdVendor.className = cellClass;
-                if (r.category === "serials") {
-                    const vSerials = vDoc.serial_numbers || [];
-                    if (vSerials.length > 0) {
-                        tdVendor.innerHTML = vSerials.map(s => `<span class="sn-inline-tag">S/N: ${s}</span>`).join(' ');
+                tr.appendChild(label);
+                [vDoc, cDoc].forEach((doc, index) => {
+                    const cell = document.createElement('td'); cell.className = `cell-${state}`;
+                    const values = r.category === 'serials' ? doc.serial_numbers : r.category === 'products' ? doc.product_names : null;
+                    if (Array.isArray(values) && values.length) {
+                        values.forEach(value => { const tag = document.createElement('span'); tag.className = `${r.category === 'serials' ? 'sn-inline-tag' : 'prod-inline-tag'}${index ? ' tag-client' : ''}`; tag.textContent = r.category === 'serials' ? `S/N: ${value}` : value; cell.appendChild(tag); });
                     } else {
-                        tdVendor.innerText = "Aucun S/N détecté";
+                        cell.textContent = r.category === 'serials' ? 'Aucun S/N détecté' : (index ? r.client_val : r.vendor_val) ?? '-';
                     }
-                } else if (r.category === "products") {
-                    const vProds = vDoc.product_names || [];
-                    if (vProds.length > 0) {
-                        tdVendor.innerHTML = vProds.map(p => `<span class="prod-inline-tag"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>${p}</span>`).join(' ');
-                    } else {
-                        tdVendor.innerText = r.vendor_val || "-";
-                    }
-                } else {
-                    tdVendor.innerText = r.vendor_val || "-";
-                }
-                tr.appendChild(tdVendor);
-
-                // Colonne 3 : Donnée Client
-                const tdClient = document.createElement('td');
-                tdClient.className = cellClass;
-                if (r.category === "serials") {
-                    const cSerials = cDoc.serial_numbers || [];
-                    if (cSerials.length > 0) {
-                        tdClient.innerHTML = cSerials.map(s => `<span class="sn-inline-tag tag-client">S/N: ${s}</span>`).join(' ');
-                    } else {
-                        tdClient.innerText = "Aucun S/N détecté";
-                    }
-
-                    // Ajout du détail de rapprochement S/N si disponible
-                    if (r.items && r.items.length > 0) {
-                        const breakdown = document.createElement('div');
-                        breakdown.className = "sn-match-breakdown";
-                        const matchSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><polyline points="20 6 9 17 4 12"/></svg>`;
-                        const warnSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`;
-                        const errorSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+                    if (index && r.category === 'serials' && Array.isArray(r.items) && r.items.length) {
+                        const breakdown = document.createElement('div'); breakdown.className = 'sn-match-breakdown';
                         r.items.forEach(it => {
-                            const line = document.createElement('div');
-                            line.className = "sn-match-line";
-                            const prodBadge = it.product_name ? `<span style="opacity:0.88; font-size:0.71rem; background:rgba(255,255,255,0.7); padding:1px 5px; border-radius:4px; margin-left:4px; font-weight:600;">${it.product_name}</span>` : '';
-                            if (it.status === "MATCH") {
-                                line.style.background = "var(--success-bg)";
-                                line.style.color = "var(--success-text)";
-                                line.style.border = "1px solid var(--success-border)";
-                                line.innerHTML = `${matchSvg} <b>${it.vendor_sn}</b>${prodBadge} → identique`;
-                            } else if (it.status === "WARNING") {
-                                line.style.background = "var(--warn-bg)";
-                                line.style.color = "var(--warn-text)";
-                                line.style.border = "1px solid var(--warn-border)";
-                                line.innerHTML = `${warnSvg} <b>${it.vendor_sn}</b>${prodBadge} ≈ <b>${it.client_sn}</b> (tolérance)`;
-                            } else {
-                                line.style.background = "var(--error-bg)";
-                                line.style.color = "var(--error-text)";
-                                line.style.border = "1px solid var(--error-border)";
-                                line.innerHTML = `${errorSvg} <b>${it.vendor_sn}</b>${prodBadge} → non refacturé`;
-                            }
-                            breakdown.appendChild(line);
+                            const line = document.createElement('div'); line.className = 'sn-match-line';
+                            const kind = it.status === 'MATCH' ? 'success' : it.status === 'WARNING' ? 'warn' : 'error';
+                            line.style.background = `var(--${kind}-bg)`; line.style.color = `var(--${kind}-text)`; line.style.border = `1px solid var(--${kind}-border)`;
+                            const vendor = document.createElement('b'); vendor.textContent = it.vendor_sn ?? '—'; line.appendChild(vendor);
+                            if (it.product_name) { const product = document.createElement('span'); product.className = 'sn-product-badge'; product.textContent = it.product_name; line.appendChild(product); }
+                            const suffix = document.createElement('span'); suffix.textContent = it.status === 'MATCH' ? ' → identique' : it.status === 'WARNING' ? ` ≈ ${it.client_sn ?? '—'} (tolérance)` : ' → non refacturé'; line.appendChild(suffix); breakdown.appendChild(line);
                         });
-                        tdClient.appendChild(breakdown);
+                        cell.appendChild(breakdown);
                     }
-                } else if (r.category === "products") {
-                    const cProds = cDoc.product_names || [];
-                    if (cProds.length > 0) {
-                        tdClient.innerHTML = cProds.map(p => `<span class="prod-inline-tag tag-client"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;margin-right:3px;"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/></svg>${p}</span>`).join(' ');
-                    } else {
-                        tdClient.innerText = r.client_val || "-";
-                    }
-                } else {
-                    tdClient.innerText = r.client_val || "-";
-                }
-                tr.appendChild(tdClient);
-
+                    tr.appendChild(cell);
+                });
                 tbody.appendChild(tr);
             });
 
@@ -2828,8 +2863,14 @@
         function resetComparison() {
             vendorFiles = [];
             clientFiles = [];
+            extraClientGroups.length = 0;
+            document.getElementById('extraClientGroups').replaceChildren();
             renderVendorPreviews();
             renderClientPreviews();
+            cleanupDocumentPreviewUrls();
+            showCompareError('');
+            document.getElementById('groupedCompareResult').style.display = 'none';
+            document.getElementById('groupedCompareResult').replaceChildren();
             document.getElementById('compareResultBox').style.display = 'none';
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -2878,6 +2919,7 @@
             const pageCountLabel = document.getElementById('pageCountLabel');
             const resultBox = document.getElementById('resultBox');
 
+            cleanupDocumentPreviewUrls();
             if (singleFiles.length === 0) {
                 container.style.display = 'none';
                 return;
@@ -3860,15 +3902,7 @@
             renderSinglePreviews();
         }
 
-        function setupDragAndDrop() {
-            // Empêche le navigateur d'ouvrir les fichiers déposés en dehors des zones prévues
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                window.addEventListener(eventName, e => e.preventDefault(), false);
-                document.body.addEventListener(eventName, e => e.preventDefault(), false);
-            });
-
-            function attachDropZone(elId, onFiles) {
-                const el = document.getElementById(elId);
+        function attachDropZone(el, onFiles) {
                 if (!el) return;
 
                 let dragCounter = 0;
@@ -3905,22 +3939,23 @@
                     dragCounter = 0;
                     el.classList.remove('drag-over');
                     const dt = e.dataTransfer;
+                    if (document.getElementById('comparisonInputs').disabled) return;
                     if (dt && dt.files && dt.files.length > 0) {
                         onFiles(dt.files);
                     }
                 }, false);
-            }
-
-            attachDropZone('vendorDropZone', handleFilesAddedToVendor);
-            attachDropZone('clientDropZone', handleFilesAddedToClient);
-            attachDropZone('singleDropZone', handleFilesAddedToSingle);
         }
 
-        // Initialisation automatique au chargement
-        document.addEventListener('DOMContentLoaded', () => {
-            updateInvoiceCountBadge();
-            setupDragAndDrop();
-        });
+        function setupDragAndDrop() {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                window.addEventListener(eventName, e => e.preventDefault(), false);
+                document.body.addEventListener(eventName, e => e.preventDefault(), false);
+            });
+            attachDropZone(document.getElementById('vendorDropZone'), handleFilesAddedToVendor);
+            attachDropZone(document.getElementById('clientDropZone'), handleFilesAddedToClient);
+            attachDropZone(document.getElementById('singleDropZone'), handleFilesAddedToSingle);
+        }
+
         updateInvoiceCountBadge();
         setupDragAndDrop();
     </script>
