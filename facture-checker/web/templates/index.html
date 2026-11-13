@@ -707,14 +707,14 @@
         #compareResultBox .kpi-mini-card { text-align: left; padding: 14px; overflow-wrap: anywhere; }
         #compareResultBox .kpi-mini-val { color: var(--text-primary); }
         #compareResultBox .compare-table { min-width: 600px; }
-        #compareResultBox .compare-table td, #groupedCompareResult .compare-table td { overflow-wrap: anywhere; }
-        #groupedCompareResult .compare-table { min-width: 600px; }
+        #compareResultBox .compare-table td, #groupedCompareResult .compare-table td, #groupedCompareResult .rec-table td { overflow-wrap: anywhere; }
+        #groupedCompareResult .compare-table, #groupedCompareResult .rec-table { min-width: 580px; }
         #groupedCompareResult h2, #groupedCompareResult h3 { margin: 18px 0 10px; color: var(--text-primary); }
         #groupedCompareResult h2:first-child { margin-top: 0; }
         #groupedCompareResult p { line-height: 1.5; overflow-wrap: anywhere; }
         #compareResultBox, #groupedCompareResult { scroll-margin-top: 20px; min-width: 0; }
         .sn-product-badge { opacity: .88; font-size: .71rem; background: rgba(255,255,255,.7); padding: 1px 5px; border-radius: 4px; margin-left: 4px; font-weight: 600; }
-        .compare-table th { overflow-wrap: anywhere; }
+        .compare-table th, .rec-table th { overflow-wrap: anywhere; }
         .table-container:focus-visible { outline: 3px solid var(--primary-deep); outline-offset: 2px; }
         #extraClientGroups .upload-zone-card { margin: 12px 0; }
         @media (max-width: 600px) { #compareResultBox .compare-kpi-grid { grid-template-columns: 1fr; } }
@@ -825,6 +825,7 @@
             border: 1px solid var(--border-subtle);
             margin-bottom: 16px;
             background: #FFFFFF;
+            box-shadow: 0 1px 4px rgba(28,25,23,0.04);
         }
 
         .compare-table {
@@ -834,37 +835,47 @@
             font-variant-numeric: tabular-nums;
         }
 
+        /* ── En-têtes du tableau comparatif 2 colonnes ── */
         .compare-table thead th {
-            padding: 11px 12px;
-            font-size: 0.78rem;
+            padding: 13px 16px;
+            font-size: 0.75rem;
             font-weight: 700;
             text-align: left;
-            background: #FAF8F5;
-            border-bottom: 1px solid var(--border-subtle);
+            background: var(--bg-surface-subtle);
+            border-bottom: 2px solid var(--border-subtle);
             color: var(--text-secondary);
-            letter-spacing: 0.02em;
+            letter-spacing: 0.03em;
             text-transform: uppercase;
+            white-space: nowrap;
         }
 
-        .th-info { width: 28%; min-width: 130px; }
+        .th-info { width: 26%; min-width: 120px; }
         .th-vendor {
-            width: 36%;
-            min-width: 160px;
-            border-left: 1px solid var(--border-subtle);
+            width: 37%;
+            min-width: 170px;
+            border-left: 2px solid var(--vendor-border);
             color: var(--vendor-color) !important;
+            background: rgba(38,67,103,0.04) !important;
         }
         .th-client {
-            width: 36%;
-            min-width: 160px;
-            border-left: 1px solid var(--border-subtle);
+            width: 37%;
+            min-width: 170px;
+            border-left: 2px solid var(--audit-success-border);
             color: var(--audit-success) !important;
+            background: rgba(30,77,61,0.04) !important;
         }
 
         .compare-row td {
-            padding: 10px 12px;
+            padding: 12px 16px;
             vertical-align: top;
-            border-bottom: 1px solid rgba(28, 25, 23, 0.05);
-            line-height: 1.45;
+            border-bottom: 1px solid rgba(28, 25, 23, 0.06);
+            line-height: 1.5;
+        }
+
+        .compare-row:last-child td { border-bottom: none; }
+
+        .compare-row:nth-child(even) td:first-child {
+            background: rgba(28,25,23,0.015);
         }
 
         .row-info-cell {
@@ -887,33 +898,35 @@
 
         /* Surlignage Sémantique Feutré */
         .cell-match {
-            background-color: rgba(30, 77, 61, 0.05) !important;
+            background-color: rgba(30, 77, 61, 0.04) !important;
             color: var(--audit-success) !important;
             font-weight: 600;
-            border-left: 2px solid var(--audit-success);
+            border-left: 3px solid var(--audit-success);
         }
 
         .cell-warning {
-            background-color: rgba(138, 79, 24, 0.05) !important;
+            background-color: rgba(138, 79, 24, 0.04) !important;
             color: var(--audit-warn) !important;
             font-weight: 600;
-            border-left: 2px solid var(--audit-warn);
+            border-left: 3px solid var(--audit-warn);
         }
 
         .cell-error {
-            background-color: rgba(138, 46, 46, 0.05) !important;
+            background-color: rgba(138, 46, 46, 0.04) !important;
             color: var(--audit-error) !important;
             font-weight: 600;
-            border-left: 2px solid var(--audit-error);
+            border-left: 3px solid var(--audit-error);
         }
 
         .row-detail-pill {
             font-size: 0.72rem;
             font-weight: 600;
-            margin-top: 4px;
-            padding: 2px 6px;
+            margin-top: 5px;
+            padding: 3px 7px;
             border-radius: var(--radius-sm);
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .pill-match { background: #E1EFE6; color: var(--audit-success); }
@@ -922,15 +935,16 @@
 
         .sn-inline-tag {
             display: inline-block;
-            padding: 2px 7px;
+            padding: 3px 8px;
             border-radius: var(--radius-sm);
-            font-weight: 600;
+            font-weight: 700;
             font-size: 0.76rem;
             margin: 2px;
             background: var(--vendor-color);
             color: white;
             font-family: var(--font-mono);
             font-variant-numeric: tabular-nums;
+            letter-spacing: 0.03em;
         }
 
         .sn-inline-tag.tag-client {
@@ -940,7 +954,7 @@
         .prod-inline-tag {
             display: inline-flex;
             align-items: center;
-            padding: 2px 8px;
+            padding: 3px 9px;
             border-radius: var(--radius-sm);
             font-weight: 600;
             font-size: 0.76rem;
@@ -954,6 +968,113 @@
             background: rgba(45, 106, 79, 0.12);
             color: var(--brand-forest);
             border-color: rgba(45, 106, 79, 0.32);
+        }
+
+        /* ══════════════════════════════════════════════
+           Tableau de rapprochement par appareil
+           (groupedCompareResult — 5 colonnes)
+        ══════════════════════════════════════════════ */
+        .rec-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .rec-table thead th {
+            padding: 11px 14px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: left;
+            background: var(--bg-surface-subtle);
+            border-bottom: 2px solid var(--border-subtle);
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .rec-th-achat  { color: var(--vendor-color)  !important; border-bottom-color: var(--vendor-border)        !important; }
+        .rec-th-vente  { color: var(--audit-success) !important; border-bottom-color: var(--audit-success-border) !important; }
+        .rec-th-sn     { color: var(--text-primary)  !important; }
+        .rec-th-statut { color: var(--text-secondary) !important; }
+
+        .rec-table tbody tr {
+            border-bottom: 1px solid rgba(28,25,23,0.055);
+            transition: background var(--duration-fast) var(--ease-out);
+        }
+
+        .rec-table tbody tr:last-child { border-bottom: none; }
+        .rec-table tbody tr:hover { background: rgba(28,25,23,0.018); }
+
+        .rec-row-match   { border-left: 3px solid var(--audit-success); }
+        .rec-row-warn    { border-left: 3px solid var(--audit-warn); }
+        .rec-row-error   { border-left: 3px solid var(--audit-error); }
+        .rec-row-neutral { border-left: 3px solid var(--border-subtle); }
+
+        .rec-row-match td:first-child   { background: rgba(30,77,61,0.03); }
+        .rec-row-warn  td:first-child   { background: rgba(138,79,24,0.03); }
+        .rec-row-error td:first-child   { background: rgba(138,46,46,0.03); }
+
+        .rec-table td {
+            padding: 11px 14px;
+            vertical-align: middle;
+            line-height: 1.4;
+        }
+
+        .rec-invoice-num {
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.86rem;
+        }
+
+        .rec-invoice-num.rec-num-vendor  { color: var(--vendor-color); }
+        .rec-invoice-num.rec-num-client  { color: var(--audit-success); }
+        .rec-invoice-num.rec-num-missing { color: var(--text-tertiary); font-style: italic; font-weight: 400; }
+
+        .rec-sn-cell {
+            font-family: var(--font-mono);
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            font-size: 0.84rem;
+            color: var(--text-primary);
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .rec-method-tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-surface-muted);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-subtle);
+            white-space: nowrap;
+        }
+
+        .rec-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 9px;
+            border-radius: var(--radius-sm);
+            white-space: nowrap;
+        }
+
+        .rec-badge-match   { background: var(--audit-success-bg); color: var(--audit-success); border: 1px solid var(--audit-success-border); }
+        .rec-badge-warn    { background: var(--audit-warn-bg);    color: var(--audit-warn);    border: 1px solid var(--audit-warn-border); }
+        .rec-badge-error   { background: var(--audit-error-bg);   color: var(--audit-error);   border: 1px solid var(--audit-error-border); }
+        .rec-badge-neutral { background: var(--audit-neutral-bg); color: var(--audit-neutral); border: 1px solid var(--audit-neutral-border); }
+
+        .rec-diagnostic-text {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            line-height: 1.4;
         }
 
         .sn-match-breakdown {
@@ -2612,38 +2733,159 @@
                 const response = await fetch('/api/compare-grouped', { method: 'POST', body: data });
                 const result = await readApiResponse(response, 'Échec de la comparaison.');
                 box.replaceChildren();
-                const heading = document.createElement('h2'); heading.textContent = result.complete ? 'Rapprochement du dossier' : 'Dossier incomplet : reprendre après correction des échecs'; box.appendChild(heading);
+
+                // ── En-tête du dossier ──
+                const heading = document.createElement('h2');
+                heading.textContent = result.complete ? 'Rapprochement du dossier' : 'Dossier incomplet : reprendre après correction des échecs';
+                heading.style.cssText = 'font-size:1.1rem;font-weight:700;color:var(--text-primary);margin:0 0 14px';
+                box.appendChild(heading);
+
+                // ── Lignes de groupe (statut d'enregistrement) ──
                 (Array.isArray(result.groups) ? result.groups : []).forEach(group => {
                     const line = document.createElement('p');
+                    const isOk = group.status === 'enregistré' || group.status === 'ok';
+                    line.style.cssText = `margin:4px 0;padding:6px 10px;border-radius:var(--radius-sm);background:${isOk ? 'var(--audit-success-bg)' : 'var(--audit-error-bg)'};color:${isOk ? 'var(--audit-success)' : 'var(--audit-error)'};font-size:0.84rem;font-weight:600;border:1px solid ${isOk ? 'var(--audit-success-border)' : 'var(--audit-error-border)'};overflow-wrap:anywhere`;
                     line.textContent = `${group.group ?? 'Groupe'} : ${group.status ?? 'Statut inconnu'}${group.invoice_id ? ` — facture enregistrée n° ${group.invoice_id}${group.reused ? ' (réutilisée)' : ''}` : ''}${group.error ? ` — ${group.error}` : ''}`;
                     box.appendChild(line);
                 });
-                (Array.isArray(result.warnings) ? result.warnings : []).forEach(warning => { const p = document.createElement('p'); p.textContent = warning; box.appendChild(p); });
+
+                (Array.isArray(result.warnings) ? result.warnings : []).forEach(warning => { const p = document.createElement('p'); p.style.cssText = 'font-size:0.82rem;color:var(--audit-warn);margin:6px 0'; p.textContent = warning; box.appendChild(p); });
+
                 if (result.complete) {
                     const totals = result.totaux_clients;
                     if (totals) {
-                        const title = document.createElement('h3'); title.textContent = 'Totaux TTC documentaires des factures client'; box.appendChild(title);
+                        // ── Section Totaux TTC ──
+                        const totalsSection = document.createElement('div');
+                        totalsSection.style.cssText = 'background:var(--bg-surface-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-md);padding:14px 16px;margin-bottom:20px';
+                        const totalsTitle = document.createElement('div');
+                        totalsTitle.textContent = 'Totaux TTC documentaires des factures client';
+                        totalsTitle.style.cssText = 'font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);margin-bottom:10px';
+                        totalsSection.appendChild(totalsTitle);
+                        const totalsGrid = document.createElement('div');
+                        totalsGrid.style.cssText = 'display:flex;flex-direction:column;gap:4px';
                         (Array.isArray(totals.factures) ? totals.factures : []).forEach(invoice => {
-                            const line = document.createElement('p');
-                            line.textContent = `${groupedInvoiceLabel(invoice.numero_facture, invoice.invoice_id, invoice.filename || 'Facture sans numéro')} : ${formatCompareAmount(invoice.montant_ttc, 'Montant TTC manquant — à vérifier')}`; box.appendChild(line);
+                            const line = document.createElement('div');
+                            line.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:0.86rem';
+                            const label = document.createElement('span');
+                            label.style.cssText = 'color:var(--text-secondary);overflow-wrap:anywhere';
+                            label.textContent = groupedInvoiceLabel(invoice.numero_facture, invoice.invoice_id, invoice.filename || 'Facture sans numéro');
+                            const amount = document.createElement('span');
+                            amount.style.cssText = 'font-variant-numeric:tabular-nums;font-weight:700;color:var(--text-primary);white-space:nowrap';
+                            amount.textContent = formatCompareAmount(invoice.montant_ttc, 'Montant TTC manquant — à vérifier');
+                            line.append(label, amount);
+                            totalsGrid.appendChild(line);
                         });
-                        const sum = document.createElement('p');
-                        sum.textContent = `${totals.complet ? 'Somme TTC' : 'Somme TTC partielle (montant manquant)'} : ${formatCompareAmount(totals.total_connu_ttc)} — ${totals.nombre_factures ?? '—'} facture(s), ${totals.montants_manquants ?? '—'} montant(s) manquant(s). Totaux documentaires, non répartis par appareil ; avoirs exclus.`; box.appendChild(sum);
+                        totalsSection.appendChild(totalsGrid);
+                        const divider = document.createElement('div');
+                        divider.style.cssText = 'height:1px;background:var(--border-subtle);margin:10px 0';
+                        totalsSection.appendChild(divider);
+                        const sum = document.createElement('div');
+                        sum.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:0.86rem';
+                        const sumLabel = document.createElement('span');
+                        sumLabel.style.cssText = 'color:var(--text-secondary);font-size:0.78rem';
+                        sumLabel.textContent = `${totals.complet ? 'Somme TTC' : 'Somme TTC partielle'} — ${totals.nombre_factures ?? '—'} facture(s), ${totals.montants_manquants ?? '—'} montant(s) manquant(s). Avoirs exclus.`;
+                        const sumAmount = document.createElement('span');
+                        sumAmount.style.cssText = 'font-variant-numeric:tabular-nums;font-weight:700;font-size:1.05rem;color:var(--text-primary);white-space:nowrap';
+                        sumAmount.textContent = formatCompareAmount(totals.total_connu_ttc);
+                        sum.append(sumLabel, sumAmount);
+                        totalsSection.appendChild(sum);
+                        box.appendChild(totalsSection);
                     }
-                    const title = document.createElement('h3'); title.textContent = 'Rapprochement par appareil'; box.appendChild(title);
+
+                    // ── Titre Rapprochement par appareil ──
+                    const title = document.createElement('div');
+                    title.style.cssText = 'font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;color:var(--text-secondary);margin-bottom:10px';
+                    title.textContent = 'Rapprochement par appareil';
                     const items = result.reconciliation && Array.isArray(result.reconciliation.items) ? result.reconciliation.items : [];
                     if (!items.length) {
+                        box.appendChild(title);
                         const empty = document.createElement('p'); empty.textContent = 'Aucun rapprochement par appareil disponible.'; box.appendChild(empty);
                     } else {
+                        box.appendChild(title);
+                        // Légende
+                        const legend = document.createElement('div');
+                        legend.className = 'legend-bar';
+                        legend.innerHTML = `
+                            <div class="legend-item"><span class="legend-dot dot-match"></span> Rapproché</div>
+                            <div class="legend-item"><span class="legend-dot dot-warning"></span> Partiel / En attente</div>
+                            <div class="legend-item"><span class="legend-dot dot-error"></span> À vérifier</div>`;
+                        box.appendChild(legend);
                         const wrapper = document.createElement('div'); wrapper.className = 'table-container'; wrapper.tabIndex = 0; wrapper.setAttribute('role', 'region'); wrapper.setAttribute('aria-label', 'Rapprochement par appareil, défilement horizontal si nécessaire');
-                        const table = document.createElement('table'); table.className = 'compare-table';
+                        const table = document.createElement('table'); table.className = 'rec-table';
                         const thead = document.createElement('thead'); const header = document.createElement('tr');
-                        ['Achat', 'Vente', 'N° série', 'Méthode', 'Statut / diagnostic'].forEach(text => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = text; header.appendChild(th); });
+                        const headers = [
+                            { text: 'Achat', cls: 'rec-th-achat' },
+                            { text: 'Vente', cls: 'rec-th-vente' },
+                            { text: 'N° série', cls: 'rec-th-sn' },
+                            { text: 'Méthode', cls: '' },
+                            { text: 'Statut / diagnostic', cls: 'rec-th-statut' },
+                        ];
+                        headers.forEach(h => { const th = document.createElement('th'); th.scope = 'col'; th.textContent = h.text; if (h.cls) th.className = h.cls; header.appendChild(th); });
                         thead.appendChild(header); table.appendChild(thead);
                         const body = document.createElement('tbody');
                         items.forEach(item => {
-                            const row = document.createElement('tr');
-                            [groupedInvoiceLabel(item.achat_num_facture, item.achat_invoice_id, 'Sans achat'), groupedInvoiceLabel(item.vente_num_facture, item.vente_invoice_id, 'En attente'), item.serial_number, item.match_method, `${item.status ?? 'Statut inconnu'} — ${item.diagnostic ?? '—'}`].forEach(value => { const cell = document.createElement('td'); cell.textContent = value ?? '—'; row.appendChild(cell); });
+                            const status = (item.status ?? '').toUpperCase();
+                            const isMatch   = status === 'RAPPROCHE';
+                            const isWarn    = status === 'RAPPROCHE_PROBABLE' || status === 'ACHAT_EN_ATTENTE';
+                            const isError   = status === 'A_VERIFIER' || status === 'NON_REFACTURE';
+                            const rowCls    = isMatch ? 'rec-row-match' : isWarn ? 'rec-row-warn' : isError ? 'rec-row-error' : 'rec-row-neutral';
+                            const badgeCls  = isMatch ? 'rec-badge-match' : isWarn ? 'rec-badge-warn' : isError ? 'rec-badge-error' : 'rec-badge-neutral';
+                            const badgeIcon = isMatch
+                                ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>'
+                                : isWarn
+                                ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+                                : '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+                            const statusLabels = { RAPPROCHE: 'Rapproché', RAPPROCHE_PROBABLE: 'Probable', ACHAT_EN_ATTENTE: 'En attente', A_VERIFIER: 'À vérifier', NON_REFACTURE: 'Non refacturé' };
+                            const badgeLabel = statusLabels[status] ?? item.status ?? 'Inconnu';
+
+                            const row = document.createElement('tr'); row.className = rowCls;
+
+                            // Colonne Achat
+                            const achatLabel = groupedInvoiceLabel(item.achat_num_facture, item.achat_invoice_id, null);
+                            const tdAchat = document.createElement('td');
+                            const achatSpan = document.createElement('span');
+                            achatSpan.className = 'rec-invoice-num' + (achatLabel ? ' rec-num-vendor' : ' rec-num-missing');
+                            achatSpan.textContent = achatLabel || 'Sans achat';
+                            tdAchat.appendChild(achatSpan); row.appendChild(tdAchat);
+
+                            // Colonne Vente
+                            const venteLabel = groupedInvoiceLabel(item.vente_num_facture, item.vente_invoice_id, null);
+                            const tdVente = document.createElement('td');
+                            const venteSpan = document.createElement('span');
+                            venteSpan.className = 'rec-invoice-num' + (venteLabel ? ' rec-num-client' : ' rec-num-missing');
+                            venteSpan.textContent = venteLabel || 'En attente';
+                            tdVente.appendChild(venteSpan); row.appendChild(tdVente);
+
+                            // Colonne N° série
+                            const tdSn = document.createElement('td');
+                            tdSn.className = 'rec-sn-cell';
+                            tdSn.textContent = item.serial_number ?? '—';
+                            row.appendChild(tdSn);
+
+                            // Colonne Méthode
+                            const tdMethod = document.createElement('td');
+                            if (item.match_method) {
+                                const tag = document.createElement('span');
+                                tag.className = 'rec-method-tag';
+                                tag.textContent = item.match_method;
+                                tdMethod.appendChild(tag);
+                            } else { tdMethod.textContent = '—'; }
+                            row.appendChild(tdMethod);
+
+                            // Colonne Statut / diagnostic
+                            const tdStatus = document.createElement('td');
+                            const badge = document.createElement('span');
+                            badge.className = `rec-status-badge ${badgeCls}`;
+                            badge.innerHTML = badgeIcon + ' ' + badgeLabel;
+                            tdStatus.appendChild(badge);
+                            if (item.diagnostic) {
+                                const diag = document.createElement('div');
+                                diag.className = 'rec-diagnostic-text';
+                                diag.textContent = item.diagnostic;
+                                tdStatus.appendChild(diag);
+                            }
+                            row.appendChild(tdStatus);
+
                             body.appendChild(row);
                         });
                         table.appendChild(body); wrapper.appendChild(table); box.appendChild(wrapper);
